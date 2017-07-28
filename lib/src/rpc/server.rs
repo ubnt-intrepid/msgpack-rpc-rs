@@ -3,7 +3,6 @@ use bytes::{BufMut, BytesMut};
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_io::codec::{Framed, Encoder, Decoder};
 use tokio_proto::multiplex::ServerProto;
-use tokio_service::Service;
 
 use super::{Request, Response};
 use super::errors::DecodeError;
