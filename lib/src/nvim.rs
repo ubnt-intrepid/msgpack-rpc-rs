@@ -1,7 +1,6 @@
 use std::io::{self, Read};
-use std::sync::mpsc::{self, TryRecvError};
+use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
 use rpc::{Request, Response};
 use tokio_io::AsyncRead;
 use tokio_service::NewService;
