@@ -1,0 +1,17 @@
+[package]
+name = "neovim"
+version = "0.0.0"
+authors = ["Yusuke Sasaki <yusuke.sasaki.nuem@gmail.com>"]
+
+[dependencies]
+error-chain = "*"
+
+bytes = "*"
+futures = "*"
+tokio-core = "*"
+tokio-io = "*"
+tokio-proto = "*"
+tokio-service = "*"
+
+rmp = "*"
+rmpv = "*"
