@@ -6,14 +6,14 @@ use tokio_io::AsyncRead;
 use tokio_service::NewService;
 
 pub struct Stdin {
-    _tx_req: mpsc::Sender<usize>,
-    _rx_data: mpsc::Receiver<io::Result<Vec<u8>>>,
+    tx_req: mpsc::Sender<usize>,
+    rx_data: mpsc::Receiver<io::Result<Vec<u8>>>,
 }
 
 impl Stdin {
     pub fn new() -> Self {
-        let (_tx_req, rx_req) = mpsc::channel();
-        let (tx_data, _rx_data) = mpsc::channel();
+        let (tx_req, rx_req) = mpsc::channel();
+        let (tx_data, rx_data) = mpsc::channel();
         thread::spawn(move || {
             let stdin = io::stdin();
             let mut locked_stdin = stdin.lock();
@@ -21,21 +21,38 @@ impl Stdin {
                 match rx_req.recv() {
                     Ok(size) => {
                         let mut buf = vec![0u8; size];
-                        let res = locked_stdin.read(&mut buf).map(|_| buf);
-                        let _ = tx_data.send(res);
+                        let result = match locked_stdin.read(&mut buf) {
+                            Ok(len) => {
+                                buf.truncate(len);
+                                Ok(buf)
+                            }
+                            Err(err) => Err(err),
+                        };
+                        let _ = tx_data.send(result);
                     }
-                    Err(_) => break,
+                    Err(_) => {
+                        let _ =
+                            tx_data.send(Err(io::Error::new(io::ErrorKind::Other, "broken pipe")));
+                        break;
+                    }
                 }
             }
         });
-        Stdin { _tx_req, _rx_data }
+        Stdin { tx_req, rx_data }
     }
 }
 
 impl Read for Stdin {
-    fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
-        // MEMO: treat non-blocking
-        Ok(0)
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.tx_req.send(buf.len()).map_err(|_| {
+            io::Error::new(io::ErrorKind::Other, "failed to send request length")
+        })?;
+        let data = self.rx_data.recv().map_err(|_| {
+            io::Error::new(io::ErrorKind::Other, "failed to recv data")
+        })??;
+
+        buf[0..(data.len())].copy_from_slice(&data);
+        Ok(data.len())
     }
 }
 
