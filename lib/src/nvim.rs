@@ -1,62 +1,48 @@
-use std::io::{self, Read};
-use std::sync::mpsc;
-use std::thread;
+use std::io::{self, Read, Write, Stdin, Stdout};
 use rpc::{Request, Response};
-use tokio_io::AsyncRead;
+use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_service::NewService;
+use futures::{Poll, Async};
 
-pub struct Stdin {
-    tx_req: mpsc::Sender<usize>,
-    rx_data: mpsc::Receiver<io::Result<Vec<u8>>>,
+
+pub struct StdioStream {
+    stdin: Stdin,
+    stdout: Stdout,
 }
 
-impl Stdin {
+impl StdioStream {
     pub fn new() -> Self {
-        let (tx_req, rx_req) = mpsc::channel();
-        let (tx_data, rx_data) = mpsc::channel();
-        thread::spawn(move || {
-            let stdin = io::stdin();
-            let mut locked_stdin = stdin.lock();
-            loop {
-                match rx_req.recv() {
-                    Ok(size) => {
-                        let mut buf = vec![0u8; size];
-                        let result = match locked_stdin.read(&mut buf) {
-                            Ok(len) => {
-                                buf.truncate(len);
-                                Ok(buf)
-                            }
-                            Err(err) => Err(err),
-                        };
-                        let _ = tx_data.send(result);
-                    }
-                    Err(_) => {
-                        let _ =
-                            tx_data.send(Err(io::Error::new(io::ErrorKind::Other, "broken pipe")));
-                        break;
-                    }
-                }
-            }
-        });
-        Stdin { tx_req, rx_data }
+        StdioStream {
+            stdin: io::stdin(),
+            stdout: io::stdout(),
+        }
     }
 }
 
-impl Read for Stdin {
+impl Read for StdioStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.tx_req.send(buf.len()).map_err(|_| {
-            io::Error::new(io::ErrorKind::Other, "failed to send request length")
-        })?;
-        let data = self.rx_data.recv().map_err(|_| {
-            io::Error::new(io::ErrorKind::Other, "failed to recv data")
-        })??;
-
-        buf[0..(data.len())].copy_from_slice(&data);
-        Ok(data.len())
+        self.stdin.read(buf)
     }
 }
 
-impl AsyncRead for Stdin {}
+impl Write for StdioStream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.stdout.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.stdout.flush()
+    }
+}
+
+
+impl AsyncRead for StdioStream {}
+
+impl AsyncWrite for StdioStream {
+    fn shutdown(&mut self) -> Poll<(), io::Error> {
+        Ok(Async::Ready(()))
+    }
+}
 
 
 
