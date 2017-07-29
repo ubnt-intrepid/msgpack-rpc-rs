@@ -12,5 +12,5 @@ extern crate rmp;
 extern crate rmpv;
 
 pub mod result;
-pub mod nvim;
+pub mod stdio;
 pub mod rpc;
