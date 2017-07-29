@@ -7,14 +7,16 @@ extern crate futures;
 extern crate bytes;
 
 use std::io::{self, BufRead, Write, Stdout};
+use std::marker::PhantomData;
 use std::thread;
+use std::sync::Arc;
 
-use futures::{Future, Stream, Sink, Poll, Async, StartSend, AsyncSink, BoxFuture, IntoFuture};
-use futures::sync::mpsc;
-use tokio_core::reactor::Core;
+use futures::{Future, Stream, Sink, Poll, Async, StartSend, AsyncSink, BoxFuture, IntoFuture, Then};
+use futures::sync::{mpsc, oneshot};
+use tokio_core::reactor::{Core, Handle};
 use tokio_proto::pipeline::ServerProto;
 use tokio_proto::BindServer;
-use tokio_service::Service;
+use tokio_service::{Service, NewService};
 
 
 struct StdioStream {
@@ -23,23 +25,28 @@ struct StdioStream {
 }
 
 impl StdioStream {
-    fn new(_chunk_size: usize) -> Self {
-        let (tx, rx) = mpsc::channel(0);
-        thread::spawn(move || Self::stdin_loop(tx));
-        StdioStream {
-            rx_stdin: rx,
+    fn new(_chunk_size: usize) -> (Self, oneshot::Receiver<()>) {
+        let (tx_stdin, rx_stdin) = mpsc::channel(0);
+        let (tx_finish, rx_finish) = oneshot::channel::<()>();
+        thread::spawn(move || Self::stdin_loop(tx_stdin, tx_finish));
+
+        let stream = StdioStream {
+            rx_stdin,
             stdout: io::stdout(),
-        }
+        };
+
+        (stream, rx_finish)
     }
 
-    fn stdin_loop(mut tx: mpsc::Sender<io::Result<Vec<u8>>>) {
+    fn stdin_loop(mut tx_stdin: mpsc::Sender<io::Result<Vec<u8>>>, tx_finish: oneshot::Sender<()>) {
         let stdin = io::stdin();
         for line in stdin.lock().lines() {
-            match tx.send(line.map(|line| line.into_bytes())).wait() {
-                Ok(t) => tx = t,
+            match tx_stdin.send(line.map(|line| line.into_bytes())).wait() {
+                Ok(t) => tx_stdin = t,
                 Err(_) => break,
             }
         }
+        let _ = tx_finish.send(());
     }
 }
 
@@ -80,10 +87,16 @@ impl Sink for StdioStream {
 
 
 // StdioStream が小分けにして送信してきた標準入力のバイト列をフレーム単位に分割する層。
-// ※ いままで Framed + Codec(Encoder/Decoder) を用いて書いていた処理だが、従来通りに書こうとすると io::Read を実装する必要が生じるため今回は使用しない
-struct LineTransport(StdioStream);
+// ※ いままで Framed + Codec(Encoder/Decoder) を用いて書いていた処理だが、
+//    従来通りに書こうとすると io::Read を実装する必要が生じるため今回は使用しない
+struct LineTransport<T>(T);
 
-impl Stream for LineTransport {
+impl<T> Stream for LineTransport<T>
+where
+    T: 'static
+        + Stream<Item = Vec<u8>, Error = io::Error>
+        + Sink<SinkItem = Vec<u8>, SinkError = io::Error>,
+{
     type Item = String;
     type Error = io::Error;
 
@@ -103,7 +116,12 @@ impl Stream for LineTransport {
     }
 }
 
-impl Sink for LineTransport {
+impl<T> Sink for LineTransport<T>
+where
+    T: 'static
+        + Stream<Item = Vec<u8>, Error = io::Error>
+        + Sink<SinkItem = Vec<u8>, SinkError = io::Error>,
+{
     type SinkItem = String;
     type SinkError = io::Error;
 
@@ -128,52 +146,131 @@ impl Sink for LineTransport {
 
 
 
-struct Proto;
+struct LineProto;
 
-impl ServerProto<StdioStream> for Proto {
+impl<T> ServerProto<T> for LineProto
+where
+    T: 'static
+        + Stream<Item = Vec<u8>, Error = io::Error>
+        + Sink<SinkItem = Vec<u8>, SinkError = io::Error>,
+{
     type Request = String;
     type Response = String;
-    type Transport = LineTransport;
+    type Transport = LineTransport<T>;
     type BindTransport = io::Result<Self::Transport>;
 
-    fn bind_transport(&self, io: StdioStream) -> Self::BindTransport {
+    fn bind_transport(&self, io: T) -> Self::BindTransport {
         Ok(LineTransport(io))
     }
 }
 
 
 
-struct StdioServer {
-    stream: StdioStream,
+struct StdioServer<Kind, P> {
+    _marker: PhantomData<Kind>,
+    protocol: P,
 }
 
-impl StdioServer {
-    fn new() -> Self {
-        StdioServer { stream: StdioStream::new(0) }
+impl<Kind, P> StdioServer<Kind, P>
+where
+    P: BindServer<Kind, StdioStream> + 'static,
+{
+    fn new(protocol: P) -> Self {
+        StdioServer {
+            protocol,
+            _marker: PhantomData,
+        }
     }
 
-    fn run<S>(self, service: S)
+    fn serve<S>(self, new_service: S)
     where
-        S: Service<Request = String, Response = String, Error = io::Error> + 'static,
+        S: NewService + 'static,
+        P::ServiceRequest: 'static,
+        P::ServiceResponse: 'static,
+        P::ServiceError: 'static,
+        S::Request: From<P::ServiceRequest>,
+        S::Response: Into<P::ServiceResponse>,
+        S::Error: Into<P::ServiceError>,
     {
-        let StdioServer { stream, .. } = self;
+        let new_service = Arc::new(new_service);
+        self.with_handle(move |_| new_service.clone())
+    }
+
+    fn with_handle<F, S>(self, new_service: F)
+    where
+        F: Fn(&Handle) -> S + 'static,
+        S: NewService + 'static,
+        P::ServiceRequest: 'static,
+        P::ServiceResponse: 'static,
+        P::ServiceError: 'static,
+        S::Request: From<P::ServiceRequest>,
+        S::Response: Into<P::ServiceResponse>,
+        S::Error: Into<P::ServiceError>,
+    {
+        fn change_types<A, B, C, D>(r: Result<A, B>) -> Result<C, D>
+        where
+            A: Into<C>,
+            B: Into<D>,
+        {
+            match r {
+                Ok(e) => Ok(e.into()),
+                Err(e) => Err(e.into()),
+            }
+        }
+
+        struct WrapService<S, Request, Response, Error> {
+            inner: S,
+            _marker: PhantomData<fn() -> (Request, Response, Error)>,
+        }
+
+        // TODO: avoid to use BoxFuture
+        impl<S, Request, Response, Error> Service for WrapService<S, Request, Response, Error>
+        where
+            S: Service,
+            Request: 'static,
+            Response: 'static,
+            Error: 'static,
+            S::Request: From<Request>,
+            S::Response: Into<Response>,
+            S::Error: Into<Error>,
+            S::Future: 'static
+        {
+            type Request = Request;
+            type Response = Response;
+            type Error = Error;
+            type Future = Then<
+                S::Future,
+                Result<Response, Error>,
+                fn(Result<S::Response,S::Error>) -> Result<Response, Error>
+            >;
+
+            fn call(&self, req: Self::Request) -> Self::Future {
+               self.inner
+                    .call(req.into())
+                    .then(change_types)
+            }
+        }
+
+        let StdioServer { protocol, .. } = self;
+        let (stream, rx_finish) = StdioStream::new(0);
 
         let mut core = Core::new().unwrap();
         let handle = core.handle();
 
-        //
-        Proto.bind_server(&handle, stream, service);
+        let new_service = new_service(&handle);
+        let service = new_service.new_service().unwrap();
+        protocol.bind_server(
+            &handle,
+            stream,
+            WrapService {
+                inner: service,
+                _marker: PhantomData,
+            },
+        );
 
-        let (tx, rx) = futures::sync::oneshot::channel();
-        let loop_fn = |_tx: futures::sync::oneshot::Sender<()>| loop {};
-        thread::spawn(move || { loop_fn(tx); });
-
-        core.run(rx).unwrap();
+        core.run(rx_finish).unwrap();
     }
 }
-
-
-
 
 
 struct Echo;
@@ -188,7 +285,8 @@ impl Service for Echo {
     }
 }
 
+
 fn main() {
-    let server = StdioServer::new();
-    server.run(Echo);
+    let server = StdioServer::new(LineProto);
+    server.serve(|| Ok(Echo));
 }
