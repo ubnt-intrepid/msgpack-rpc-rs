@@ -6,76 +6,127 @@ extern crate tokio_service;
 extern crate futures;
 extern crate bytes;
 
-use neovim::nvim::StdioStream;
-
-use std::io;
+use std::io::{self, BufRead, Write, Stdout};
 use std::thread;
 
-use bytes::{BytesMut, Buf, BufMut, BigEndian, IntoBuf};
-use futures::{Future, IntoFuture};
-use futures::future::BoxFuture;
-use futures::sync::oneshot;
+use futures::{Future, Stream, Sink, Poll, Async, StartSend, AsyncSink, BoxFuture, IntoFuture};
+use futures::sync::mpsc;
 use tokio_core::reactor::Core;
-use tokio_io::{AsyncRead, AsyncWrite};
-use tokio_io::codec::{Encoder, Decoder, Framed};
+use tokio_proto::pipeline::ServerProto;
 use tokio_proto::BindServer;
-use tokio_proto::multiplex::{ServerProto, RequestId};
 use tokio_service::Service;
 
-struct LineCodec;
-impl Decoder for LineCodec {
-    type Item = (RequestId, String);
-    type Error = io::Error;
-    fn decode(&mut self, buf: &mut BytesMut) -> io::Result<Option<Self::Item>> {
-        if buf.len() < 5 {
-            return Ok(None);
-        }
-        let newline = buf[4..].iter().position(|b| *b == b'\n');
-        if let Some(n) = newline {
-            let mut line = buf.split_to(n + 4);
-            buf.split_to(1);
-            let id = line.split_to(4).into_buf().get_u32::<BigEndian>();
-            return match std::str::from_utf8(&line[..]) {
-                Ok(s) => Ok(Some((id as RequestId, s.to_string()))),
-                Err(_) => Err(io::Error::new(io::ErrorKind::Other, "invalid string")),
-            };
-        }
-        Ok(None)
-    }
+
+struct StdioStream {
+    rx_stdin: mpsc::Receiver<io::Result<Vec<u8>>>,
+    stdout: Stdout,
 }
-impl Encoder for LineCodec {
-    type Item = (RequestId, String);
-    type Error = io::Error;
-    fn encode(&mut self, msg: Self::Item, buf: &mut BytesMut) -> io::Result<()> {
-        let len = 4 + buf.len() + 1;
-        buf.reserve(len);
-        let (request_id, msg) = msg;
-        buf.put_u32::<BigEndian>(request_id as u32);
-        buf.put_slice(msg.as_bytes());
-        buf.put_u8(b'\n');
-        Ok(())
+
+impl StdioStream {
+    fn new() -> Self {
+        let (mut tx, rx) = mpsc::channel(0);
+        thread::spawn(move || {
+            let stdin = io::stdin();
+            for line in stdin.lock().lines() {
+                match tx.send(line.map(|line| line.into_bytes())).wait() {
+                    Ok(t) => tx = t,
+                    Err(_) => break,
+                }
+            }
+        });
+        StdioStream {
+            rx_stdin: rx,
+            stdout: io::stdout(),
+        }
     }
 }
 
-struct LineProto;
-impl<T: AsyncRead + AsyncWrite + 'static> ServerProto<T> for LineProto {
+impl Stream for StdioStream {
+    type Item = Vec<u8>;
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+        match self.rx_stdin.poll() {
+            Ok(Async::Ready(Some(res))) => res.map(|line| Async::Ready(Some(line))),
+            Ok(Async::Ready(None)) => Ok(Async::Ready(None)),
+            Ok(Async::NotReady) => Ok(Async::NotReady),
+            Err(_) => Err(io::Error::new(io::ErrorKind::Other, "broken channel")),
+        }
+    }
+}
+
+impl Sink for StdioStream {
+    type SinkItem = Vec<u8>;
+    type SinkError = io::Error;
+
+    fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
+        match self.stdout.write(&item) {
+            Ok(_n) => Ok(AsyncSink::Ready),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
+        match self.stdout.flush() {
+            Ok(()) => Ok(Async::Ready(())),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+struct DummyTransport(StdioStream);
+
+impl Stream for DummyTransport {
+    type Item = String;
+    type Error = io::Error;
+    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+        self.0.poll().map(|poll| match poll {
+            Async::Ready(Some(bytes)) => Async::Ready(
+                Some(unsafe { String::from_utf8_unchecked(bytes) }),
+            ),
+            Async::Ready(None) => Async::Ready(None),
+            Async::NotReady => Async::NotReady,
+        })
+    }
+}
+
+impl Sink for DummyTransport {
+    type SinkItem = String;
+    type SinkError = io::Error;
+    fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
+        self.0.start_send(item.into_bytes()).map(|s| match s {
+            AsyncSink::Ready => AsyncSink::Ready,
+            AsyncSink::NotReady(s) => AsyncSink::NotReady(
+                unsafe { String::from_utf8_unchecked(s) },
+            ),
+        })
+    }
+    fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
+        self.0.poll_complete()
+    }
+}
+
+struct Proto;
+impl ServerProto<StdioStream> for Proto {
     type Request = String;
     type Response = String;
-    type Transport = Framed<T, LineCodec>;
-    type BindTransport = Result<Self::Transport, io::Error>;
-    fn bind_transport(&self, io: T) -> Self::BindTransport {
-        Ok(io.framed(LineCodec))
+    type Transport = DummyTransport;
+    type BindTransport = io::Result<Self::Transport>;
+
+    fn bind_transport(&self, io: StdioStream) -> Self::BindTransport {
+        Ok(DummyTransport(io))
     }
 }
 
-struct LineService;
-impl Service for LineService {
+struct Echo;
+
+impl Service for Echo {
     type Request = String;
     type Response = String;
     type Error = io::Error;
     type Future = BoxFuture<Self::Response, Self::Error>;
     fn call(&self, req: Self::Request) -> Self::Future {
-        Ok(format!("Received: {:?}", req)).into_future().boxed()
+        Ok(format!("Received: {:?}\n", req)).into_future().boxed()
     }
 }
 
@@ -84,11 +135,11 @@ fn main() {
     let handle = core.handle();
 
     let stream = StdioStream::new();
-    LineProto.bind_server(&handle, stream, LineService);
+    Proto.bind_server(&handle, stream, Echo);
 
-    let (tx, rx) = oneshot::channel();
-    let loop_fn = |_tx: oneshot::Sender<()>| loop {};
-    thread::spawn(move || loop_fn(tx));
+    let (tx, rx) = futures::sync::oneshot::channel();
+    let loop_fn = |_tx: futures::sync::oneshot::Sender<()>| loop {};
+    thread::spawn(move || { loop_fn(tx); });
 
     core.run(rx).unwrap();
 }

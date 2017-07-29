@@ -22,7 +22,7 @@ impl StdioStream {
 
 impl Read for StdioStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.stdin.read(buf)
+        self.stdin.read(&mut buf[0..32])
     }
 }
 
