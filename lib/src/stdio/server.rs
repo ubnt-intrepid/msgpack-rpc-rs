@@ -1,8 +1,6 @@
 use std::marker::PhantomData;
-use std::thread;
 use std::sync::Arc;
 use futures::{Future, Then};
-use futures::sync::oneshot;
 use tokio_core::reactor::{Core, Handle};
 use tokio_proto::BindServer;
 use tokio_service::{Service, NewService};
@@ -119,18 +117,5 @@ where
         );
 
         core.run(rx_finish).unwrap();
-        // let _rx_finish = rx_finish;
-        // core.run(infinity()).unwrap();
     }
-}
-
-#[allow(dead_code)]
-#[allow(unreachable_code)]
-fn infinity() -> oneshot::Receiver<()> {
-    let (tx, rx) = oneshot::channel();
-    thread::spawn(|| {
-        loop {}
-        let _tx = tx;
-    });
-    rx
 }
