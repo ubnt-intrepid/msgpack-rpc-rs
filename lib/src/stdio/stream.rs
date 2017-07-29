@@ -44,8 +44,9 @@ impl StdioStream {
         let mut locked_stdin = stdin.lock();
         loop {
             let mut bytes = vec![0u8; chunk_size];
-            match locked_stdin.read_exact(&mut bytes) {
-                Ok(()) => {
+            match locked_stdin.read(&mut bytes) {
+                Ok(n_bytes) => {
+                    bytes.truncate(n_bytes);
                     match tx_stdin.send(Ok(bytes)).wait() {
                         Ok(t) => tx_stdin = t,
                         Err(_) => break,
