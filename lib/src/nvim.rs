@@ -1,9 +1,10 @@
 use std::io::{self, Read, Write, Stdin, Stdout};
-use rpc::{Request, Response};
+use rpc::{Request, Response, server};
 use tokio_io::{AsyncRead, AsyncWrite};
-use tokio_service::NewService;
+use tokio_service::Service;
 use futures::{Poll, Async};
-
+use tokio_core::reactor::Handle;
+use tokio_proto::BindServer;
 
 pub struct StdioStream {
     stdin: Stdin,
@@ -49,9 +50,12 @@ impl AsyncWrite for StdioStream {
 pub struct NeoVim {}
 
 impl NeoVim {
-    pub fn serve<S>()
+    pub fn serve<S>(self, handle: &Handle, service: S)
     where
-        S: NewService<Request = Request, Response = Response, Error = io::Error>,
+        S: Service<Request = Request, Response = Response, Error = io::Error> + 'static,
     {
+        let io = StdioStream::new();
+        let protocol = server::Proto;
+        protocol.bind_server(handle, io, service)
     }
 }
