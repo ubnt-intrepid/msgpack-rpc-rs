@@ -6,14 +6,16 @@ extern crate tokio_service;
 extern crate futures;
 extern crate bytes;
 
-use std::io::{self, BufRead, Write, Stdout};
+use std::io::{self, Read, Write, Stdout};
 use std::marker::PhantomData;
 use std::thread;
 use std::sync::Arc;
 
+use bytes::BytesMut;
 use futures::{Future, Stream, Sink, Poll, Async, StartSend, AsyncSink, BoxFuture, IntoFuture, Then};
 use futures::sync::{mpsc, oneshot};
 use tokio_core::reactor::{Core, Handle};
+use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_proto::pipeline::ServerProto;
 use tokio_proto::BindServer;
 use tokio_service::{Service, NewService};
@@ -25,10 +27,12 @@ struct StdioStream {
 }
 
 impl StdioStream {
-    fn new(_chunk_size: usize) -> (Self, oneshot::Receiver<()>) {
+    fn new(chunk_size: usize) -> (Self, oneshot::Receiver<()>) {
+        assert!(chunk_size > 0);
+
         let (tx_stdin, rx_stdin) = mpsc::channel(0);
         let (tx_finish, rx_finish) = oneshot::channel::<()>();
-        thread::spawn(move || Self::stdin_loop(tx_stdin, tx_finish));
+        thread::spawn(move || Self::stdin_loop(tx_stdin, tx_finish, chunk_size));
 
         let stream = StdioStream {
             rx_stdin,
@@ -38,12 +42,26 @@ impl StdioStream {
         (stream, rx_finish)
     }
 
-    fn stdin_loop(mut tx_stdin: mpsc::Sender<io::Result<Vec<u8>>>, tx_finish: oneshot::Sender<()>) {
+    fn stdin_loop(
+        mut tx_stdin: mpsc::Sender<io::Result<Vec<u8>>>,
+        tx_finish: oneshot::Sender<()>,
+        chunk_size: usize,
+    ) {
         let stdin = io::stdin();
-        for line in stdin.lock().lines() {
-            match tx_stdin.send(line.map(|line| line.into_bytes())).wait() {
-                Ok(t) => tx_stdin = t,
-                Err(_) => break,
+        let mut locked_stdin = stdin.lock();
+        loop {
+            let mut bytes = vec![0u8; chunk_size];
+            match locked_stdin.read_exact(&mut bytes) {
+                Ok(()) => {
+                    match tx_stdin.send(Ok(bytes)).wait() {
+                        Ok(t) => tx_stdin = t,
+                        Err(_) => break,
+                    }
+                }
+                Err(err) => {
+                    let _ = tx_stdin.send(Err(err)).wait();
+                    break;
+                }
             }
         }
         let _ = tx_finish.send(());
@@ -81,6 +99,78 @@ impl Sink for StdioStream {
             Ok(()) => Ok(Async::Ready(())),
             Err(e) => Err(e),
         }
+    }
+}
+
+struct Stdio {
+    inner: StdioStream,
+    buffer: BytesMut,
+    is_finished: bool,
+}
+
+impl Stdio {
+    fn new() -> (Stdio, oneshot::Receiver<()>) {
+        let (inner, rx) = StdioStream::new(0);
+        let buffer = BytesMut::new();
+        let stdio = Stdio {
+            inner,
+            buffer,
+            is_finished: false,
+        };
+        (stdio, rx)
+    }
+}
+
+impl Read for Stdio {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.is_finished {
+            return Ok(0);
+        }
+
+        if self.buffer.len() > 0 {
+            // read from buffer.
+            let len = std::cmp::min(self.buffer.len(), buf.len());
+            buf[0..len].copy_from_slice(&self.buffer[0..len]);
+            self.buffer.split_to(len);
+            return Ok(len);
+        }
+
+        debug_assert_eq!(self.buffer.len(), 0);
+
+        match self.inner.poll() {
+            Ok(Async::Ready(Some(bytes))) => {
+                let len = std::cmp::min(bytes.len(), buf.len());
+                buf[0..len].copy_from_slice(&bytes[0..len]);
+                if len < bytes.len() {
+                    self.buffer.extend_from_slice(&bytes[len..]);
+                }
+                Ok(len)
+            }
+            Ok(Async::Ready(None)) => {
+                self.is_finished = true;
+                Ok(0)
+            }
+            Ok(Async::NotReady) => Err(io::Error::new(io::ErrorKind::WouldBlock, "Not ready")),
+            Err(err) => Err(err),
+        }
+    }
+}
+
+impl Write for Stdio {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.inner.stdout.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.stdout.flush()
+    }
+}
+
+impl AsyncRead for Stdio {}
+
+impl AsyncWrite for Stdio {
+    fn shutdown(&mut self) -> Poll<(), io::Error> {
+        Ok(Async::Ready(()))
     }
 }
 
@@ -252,7 +342,7 @@ where
         }
 
         let StdioServer { protocol, .. } = self;
-        let (stream, rx_finish) = StdioStream::new(0);
+        let (stream, rx_finish) = StdioStream::new(32);
 
         let mut core = Core::new().unwrap();
         let handle = core.handle();
