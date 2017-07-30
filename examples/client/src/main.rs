@@ -25,8 +25,8 @@ fn main() {
             .stderr(Stdio::inherit()),
         &handle,
     ).unwrap();
-    let client = Client::new_service(stream, &handle);
 
+    let client = Client::new(stream, &handle);
     let task = client
         .call(Request::new("nvim_get_api_info", vec![]))
         .and_then(|response| {

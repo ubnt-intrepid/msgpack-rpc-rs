@@ -75,10 +75,16 @@ pub struct Client<T: AsyncRead + AsyncWrite + 'static> {
 }
 
 impl<T: AsyncRead + AsyncWrite + 'static> Client<T> {
-    pub fn new_service(stream: T, handle: &Handle) -> Self {
+    pub fn new(stream: T, handle: &Handle) -> Self {
         let transport = ClientTransport::new(stream);
         let inner = Proto.bind_client(handle, transport);
         Client { inner }
+    }
+
+    /// Send a request message to the server, and return a future of its response.
+    #[cfg_attr(rustfmt, rustfmt_skip)]
+    pub fn request(&self, req: Request) -> <ClientService<ClientTransport<T>, Proto> as Service>::Future {
+        self.inner.call(req)
     }
 
     /// Send a notification message to the server.
@@ -94,6 +100,6 @@ impl<T: AsyncRead + AsyncWrite + 'static> Service for Client<T> {
     type Future = <ClientService<ClientTransport<T>, Proto> as Service>::Future;
 
     fn call(&self, req: Self::Request) -> Self::Future {
-        self.inner.call(req)
+        self.request(req)
     }
 }
