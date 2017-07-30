@@ -3,14 +3,15 @@ use futures::{Stream, Sink, Poll, Async, AsyncSink, StartSend};
 use tokio_core::reactor::Handle;
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_io::codec::Framed;
+use tokio_proto::BindClient;
 use tokio_proto::multiplex::{ClientProto, ClientService};
 use tokio_service::Service;
 
 use super::codec::Codec;
-use super::message::{Message, Request, Response};
+use super::message::{Message, Request, Response, Notification};
 
 
-
+// TODO: notification
 pub struct ClientTransport<T> {
     inner: Framed<T, Codec>,
 }
@@ -68,30 +69,25 @@ impl<T: AsyncRead + AsyncWrite + 'static> ClientProto<ClientTransport<T>> for Pr
     }
 }
 
-use tokio_proto::BindClient;
 
-pub struct Client<T>
-where
-    T: AsyncRead + AsyncWrite + 'static,
-{
+pub struct Client<T: AsyncRead + AsyncWrite + 'static> {
     inner: ClientService<ClientTransport<T>, Proto>,
 }
 
-impl<T> Client<T>
-where
-    T: AsyncRead + AsyncWrite + 'static,
-{
+impl<T: AsyncRead + AsyncWrite + 'static> Client<T> {
     pub fn new_service(stream: T, handle: &Handle) -> Self {
         let transport = ClientTransport::new(stream);
         let inner = Proto.bind_client(handle, transport);
         Client { inner }
     }
+
+    /// Send a notification message to the server.
+    pub fn notify(&self, _not: Notification) {
+        // TODO: implement
+    }
 }
 
-impl<T> Service for Client<T>
-where
-    T: AsyncRead + AsyncWrite + 'static,
-{
+impl<T: AsyncRead + AsyncWrite + 'static> Service for Client<T> {
     type Request = Request;
     type Response = Response;
     type Error = io::Error;
