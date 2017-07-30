@@ -20,38 +20,22 @@ impl Message {
     pub fn from_reader<R: Read>(r: &mut R) -> Result<Message, DecodeError> {
         let value = next_value(r)?;
         let array = value.as_array().ok_or(DecodeError::Invalid)?;
-
         match (array.get(0).and_then(|v| v.as_i64()), array.len()) {
-            (Some(REQUEST_TYPE), n) if n >= 4 => {
-                let id = array[1].as_i64().ok_or(DecodeError::Invalid)? as u64;
-                let method = array[2].as_str().ok_or(DecodeError::Invalid)?.to_owned();
-                let params = array[3].as_array().ok_or(DecodeError::Invalid)?.clone();
-                Ok(Message::Request(id, Request { method, params }))
-            }
-            (Some(RESPONSE_TYPE), n) if n >= 3 => {
-                let id = array[1].as_i64().ok_or(DecodeError::Invalid)? as u64;
-                match (&array[2], &array[3]) {
-                    (val, &Value::Nil) => Ok(Message::Response(id, Response(Ok(val.clone())))),
-                    (&Value::Nil, val) => Ok(Message::Response(id, Response(Err(val.clone())))),
-                    _ => return Err(DecodeError::Invalid),
-                }
-            }
-            (Some(NOTIFICATION_TYPE), n) if n >= 3 => {
-                let method = array[1].as_str().ok_or(DecodeError::Invalid)?.to_owned();
-                let params = array[2].as_array().ok_or(DecodeError::Invalid)?.clone();
-                Ok(Message::Notification(Notification { method, params }))
-            }
+            (Some(REQUEST_TYPE), n) if n >= 4 => Request::from_array(&array[1..4]),
+            (Some(RESPONSE_TYPE), n) if n >= 4 => Response::from_array(&array[1..4]),
+            (Some(NOTIFICATION_TYPE), n) if n >= 3 => Notification::from_array(&array[1..3]),
             _ => Err(DecodeError::Invalid),
         }
     }
 
     /// Write a response to an output stream, with given ID.
     pub fn to_writer<W: Write>(&self, w: &mut W) -> io::Result<()> {
-        match *self {
-            Message::Request(id, ref req) => req.to_writer(id, w),
-            Message::Response(id, ref res) => res.to_writer(id, w),
-            Message::Notification(ref not) => not.to_writer(w),
-        }
+        let packet = match *self {
+            Message::Request(id, ref req) => req.to_packet(id),
+            Message::Response(id, ref res) => res.to_packet(id),
+            Message::Notification(ref not) => not.to_packet(),
+        };
+        write_packet(w, &packet)
     }
 }
 
@@ -72,15 +56,28 @@ impl Request {
         Request { method, params }
     }
 
-    /// Write a response to an output stream, with given ID.
-    pub fn to_writer<W: Write>(&self, id: u64, w: &mut W) -> io::Result<()> {
-        let packet = Value::Array(vec![
-            Value::Integer(REQUEST_TYPE.into()),
-            Value::Integer(id.into()),
-            Value::String(self.method.clone().into()),
-            Value::Array(self.params.clone()),
-        ]);
-        write_packet(w, &packet)
+    pub fn from_array(array: &[Value]) -> Result<Message, DecodeError> {
+        match (array[0].as_i64(), array[1].as_str(), array[2].as_array()) {
+            (Some(id), Some(method), Some(params)) => {
+                Ok(Message::Request(
+                    id as u64,
+                    Request {
+                        method: method.to_owned(),
+                        params: params.clone(),
+                    },
+                ))
+            }
+            _ => Err(DecodeError::Invalid),
+        }
+    }
+
+    pub fn to_packet(&self, id: u64) -> Value {
+        Value::Array(vec![
+            REQUEST_TYPE.into(),
+            id.into(),
+            self.method.as_str().into(),
+            self.params.clone().into(),
+        ])
     }
 }
 
@@ -113,16 +110,26 @@ impl Response {
         self.0
     }
 
-    /// Write a response to an output stream, with given ID
-    pub fn to_writer<W: Write>(&self, id: u64, w: &mut W) -> io::Result<()> {
-        // TODO: use ValueRef to avoid cloning
-        let packet = Value::Array(vec![
-            Value::Integer(RESPONSE_TYPE.into()),
-            Value::Integer(id.into()),
+    pub fn from_array(array: &[Value]) -> Result<Message, DecodeError> {
+        match (array[0].as_i64(), &array[1], &array[2]) {
+            (Some(id), val, &Value::Nil) => Ok(
+                Message::Response(id as u64, Response(Ok(val.clone()))),
+            ),
+            (Some(id), &Value::Nil, val) => Ok(Message::Response(
+                id as u64,
+                Response(Err(val.clone())),
+            )),
+            _ => return Err(DecodeError::Invalid),
+        }
+    }
+
+    pub fn to_packet(&self, id: u64) -> Value {
+        Value::Array(vec![
+            RESPONSE_TYPE.into(),
+            id.into(),
             self.0.as_ref().ok().cloned().unwrap_or(Value::Nil),
             self.0.as_ref().err().cloned().unwrap_or(Value::Nil),
-        ]);
-        write_packet(w, &packet)
+        ])
     }
 }
 
@@ -143,14 +150,22 @@ impl Notification {
         Notification { method, params }
     }
 
-    /// Write a notification to an output stream
-    pub fn to_writer<W: Write>(&self, w: &mut W) -> io::Result<()> {
-        let packet = Value::Array(vec![
-            Value::Integer(NOTIFICATION_TYPE.into()),
-            Value::String(self.method.clone().into()),
-            Value::Array(self.params.clone()),
-        ]);
-        write_packet(w, &packet)
+    pub fn from_array(array: &[Value]) -> Result<Message, DecodeError> {
+        match (array[0].as_str(), array[1].as_array()) {
+            (Some(method), Some(params)) => Ok(Message::Notification(Notification {
+                method: method.to_owned(),
+                params: params.clone(),
+            })),
+            _ => Err(DecodeError::Invalid),
+        }
+    }
+
+    pub fn to_packet(&self) -> Value {
+        Value::Array(vec![
+            NOTIFICATION_TYPE.into(),
+            self.method.as_str().into(),
+            self.params.clone().into(),
+        ])
     }
 }
 
