@@ -26,6 +26,9 @@ impl Service for Echo {
 
 
 fn main() {
-    let server = StdioServer::new(MsgpackRPCProto, 1);
-    server.serve(|| Ok(Echo));
+    let server = StdioServer::new(MsgpackRPCProto, 4);
+    server.serve(|| Ok(Echo), |not| {
+        eprintln!("[debug] {:?}", not);
+        Ok(())
+    });
 }

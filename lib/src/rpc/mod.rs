@@ -4,11 +4,12 @@
 //! Currently, notification messages are not supported.
 //!
 
+mod codec;
 mod message;
 mod errors;
 pub mod client;
 pub mod server;
 
 pub use rmpv::Value;
-pub use self::message::{Request, Response};
+pub use self::message::{Message, Request, Response, Notification};
 pub use self::errors::DecodeError;

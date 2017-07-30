@@ -1,62 +1,93 @@
 use std::io;
-use bytes::{BufMut, BytesMut};
+use futures::{Stream, Sink, Poll, Async, AsyncSink, StartSend};
+use futures::sync::mpsc;
 use tokio_io::{AsyncRead, AsyncWrite};
-use tokio_io::codec::{Framed, Encoder, Decoder};
+use tokio_io::codec::Framed;
 use tokio_proto::multiplex::ServerProto;
 
-use super::{Request, Response};
-use super::errors::DecodeError;
+use super::codec::Codec;
+use super::message::{Message, Request, Response, Notification};
 
 
-///
-pub struct Codec;
+pub struct ServerTransport<T> {
+    inner: Framed<T, Codec>,
+    tx_notify: mpsc::Sender<Notification>,
+}
 
-impl Encoder for Codec {
-    type Item = (u64, Response);
-    type Error = io::Error;
-
-    fn encode(&mut self, msg: Self::Item, buf: &mut BytesMut) -> io::Result<()> {
-        let (id, res) = msg;
-        res.to_writer(id, &mut buf.writer())
+impl<T: AsyncRead + AsyncWrite + 'static> ServerTransport<T> {
+    pub fn new(io: T) -> (Self, mpsc::Receiver<Notification>) {
+        let (tx_notify, rx_notify) = mpsc::channel(1);
+        let transport = ServerTransport {
+            inner: io.framed(Codec),
+            tx_notify,
+        };
+        (transport, rx_notify)
     }
 }
 
-impl Decoder for Codec {
+impl<T: AsyncRead + AsyncWrite + 'static> Stream for ServerTransport<T> {
     type Item = (u64, Request);
     type Error = io::Error;
 
-    fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<Self::Item>> {
-        let (req, pos);
-        {
-            let mut buf = io::Cursor::new(&src);
-            req = loop {
-                match Request::from_reader(&mut buf) {
-                    Ok(message) => break Ok(Some(message)),
-                    Err(DecodeError::Truncated) => return Ok(None),
-                    Err(DecodeError::Invalid) => continue,
-                    Err(DecodeError::Unknown(err)) => break Err(err),
+    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+        loop {
+            match try_ready!(self.inner.poll()) {
+                Some(Message::Request(id, req)) => return Ok(Async::Ready(Some((id, req)))),
+                Some(Message::Notification(mut not)) => {
+                    loop {
+                        not = match self.tx_notify.start_send(not) {
+                            Ok(AsyncSink::Ready) => break,
+                            Ok(AsyncSink::NotReady(n)) => n,
+                            Err(_) => {
+                                return Err(io::Error::new(
+                                    io::ErrorKind::Other,
+                                    "cannot send notification",
+                                ))
+                            }
+                        };
+                    }
+                    continue;
                 }
-            };
-            pos = buf.position() as usize;
+                Some(_) => {
+                    continue;
+                }
+                None => return Ok(Async::Ready(None)),
+            }
         }
-        src.split_to(pos);
-        req
     }
 }
+
+impl<T: AsyncRead + AsyncWrite + 'static> Sink for ServerTransport<T> {
+    type SinkItem = (u64, Response);
+    type SinkError = io::Error;
+
+    fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
+        match self.inner.start_send(Message::Response(item.0, item.1)) {
+            Ok(AsyncSink::Ready) => Ok(AsyncSink::Ready),
+            Ok(AsyncSink::NotReady(Message::Response(id, res))) => Ok(
+                AsyncSink::NotReady((id, res)),
+            ),
+            Ok(AsyncSink::NotReady(_)) => unreachable!(),
+            Err(err) => Err(err),
+        }
+    }
+
+    fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
+        self.inner.poll_complete()
+    }
+}
+
 
 pub struct Proto;
 
-impl<T: AsyncRead + AsyncWrite + 'static> ServerProto<T> for Proto {
+impl<T: AsyncRead + AsyncWrite + 'static> ServerProto<ServerTransport<T>> for Proto {
     type Request = Request;
     type Response = Response;
 
-    type Transport = Framed<T, Codec>;
+    type Transport = ServerTransport<T>;
     type BindTransport = Result<Self::Transport, io::Error>;
 
-    fn bind_transport(&self, io: T) -> Self::BindTransport {
-        Ok(io.framed(Codec))
+    fn bind_transport(&self, io: ServerTransport<T>) -> Self::BindTransport {
+        Ok(io)
     }
 }
-
-
-// TODO: implement Server

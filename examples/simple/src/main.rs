@@ -14,12 +14,12 @@ fn main() {
     let handle = core.handle();
 
     let task = Client::connect("127.0.0.1:6666", &handle).and_then(|client| {
-        client.call(Request::new("nvim_get_api_info", vec![])).and_then(
-            |response| {
+        client
+            .call(Request::new("nvim_get_api_info", vec![]))
+            .and_then(|response| {
                 println!("{:?}", response);
                 Ok(())
-            },
-        )
+            })
     });
     core.run(task).unwrap();
 }
