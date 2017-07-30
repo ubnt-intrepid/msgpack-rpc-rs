@@ -12,6 +12,7 @@ tokio-core = "*"
 tokio-io = "*"
 tokio-proto = "*"
 tokio-service = "*"
+tokio-process = "*"
 
 rmp = "*"
 rmpv = "*"

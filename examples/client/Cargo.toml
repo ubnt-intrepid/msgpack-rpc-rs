@@ -7,7 +7,4 @@ authors = ["Yusuke Sasaki <yusuke.sasaki.nuem@gmail.com>"]
 neovim = { path = "../../lib/" }
 futures = "*"
 tokio-core = "*"
-tokio-io = "*"
 tokio-service = "*"
-tokio-process = "*"
-
