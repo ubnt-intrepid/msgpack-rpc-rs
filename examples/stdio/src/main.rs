@@ -2,7 +2,7 @@ extern crate neovim;
 extern crate futures;
 extern crate tokio_service;
 
-use neovim::stdio::StdioServer;
+use neovim::stdio::StdioStream;
 use neovim::rpc::{Request, Response};
 use neovim::rpc::server::Proto as MsgpackRPCProto;
 
@@ -26,9 +26,14 @@ impl Service for Echo {
 
 
 fn main() {
-    let server = StdioServer::new(MsgpackRPCProto, 4);
-    server.serve(|| Ok(Echo), |not| {
-        eprintln!("[debug] {:?}", not);
-        Ok(())
-    });
+    let (stream, task) = StdioStream::new(4);
+    MsgpackRPCProto.serve(
+        stream,
+        || Ok(Echo),
+        |not| {
+            eprintln!("[debug] {:?}", not);
+            Ok(())
+        },
+        task.map_err(|_| ()),
+    );
 }
