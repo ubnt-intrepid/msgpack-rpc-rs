@@ -7,17 +7,6 @@ use tokio_service::{Service, NewService};
 use super::StdioStream;
 
 
-fn change_types<A, B, C, D>(r: Result<A, B>) -> Result<C, D>
-where
-    A: Into<C>,
-    B: Into<D>,
-{
-    match r {
-        Ok(e) => Ok(e.into()),
-        Err(e) => Err(e.into()),
-    }
-}
-
 struct WrapService<S, Request, Response, Error> {
     inner: S,
     _marker: PhantomData<fn() -> (Request, Response, Error)>,
@@ -40,13 +29,13 @@ where
     type Future = Then<
         S::Future,
         Result<Response, Error>,
-        fn(Result<S::Response,S::Error>) -> Result<Response, Error>
+        fn(Result<S::Response, S::Error>) -> Result<Response, Error>
     >;
 
     fn call(&self, req: Self::Request) -> Self::Future {
        self.inner
-            .call(req.into())
-            .then(change_types)
+           .call(req.into())
+           .then(|r| r.map(Into::into).map_err(Into::into))
     }
 }
 
