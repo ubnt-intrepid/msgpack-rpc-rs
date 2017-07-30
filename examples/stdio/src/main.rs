@@ -3,7 +3,7 @@ extern crate futures;
 extern crate tokio_service;
 
 use neovim::stdio::StdioServer;
-use neovim::rpc::{Request, Response, Value};
+use neovim::rpc::{Request, Response};
 use neovim::rpc::server::Proto as MsgpackRPCProto;
 
 use std::io;
@@ -20,7 +20,7 @@ impl Service for Echo {
     type Future = BoxFuture<Self::Response, Self::Error>;
     fn call(&self, req: Self::Request) -> Self::Future {
         eprintln!("[Received: {:?}]", req);
-        Ok(Response(Ok(Value::Nil))).into_future().boxed()
+        Ok(Response::from_ok(true)).into_future().boxed()
     }
 }
 
