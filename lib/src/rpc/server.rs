@@ -23,6 +23,21 @@ impl<T: AsyncRead + AsyncWrite + 'static> ServerTransport<T> {
         };
         (transport, rx_notify)
     }
+
+    fn notify(&mut self, mut not: Notification) -> io::Result<()> {
+        loop {
+            not = match self.tx_notify.start_send(not) {
+                Ok(AsyncSink::Ready) => break Ok(()),
+                Ok(AsyncSink::NotReady(n)) => n,
+                Err(_) => {
+                    break Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "cannot send notification",
+                    ))
+                }
+            }
+        }
+    }
 }
 
 impl<T: AsyncRead + AsyncWrite + 'static> Stream for ServerTransport<T> {
@@ -32,26 +47,13 @@ impl<T: AsyncRead + AsyncWrite + 'static> Stream for ServerTransport<T> {
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         loop {
             match try_ready!(self.inner.poll()) {
-                Some(Message::Request(id, req)) => return Ok(Async::Ready(Some((id, req)))),
-                Some(Message::Notification(mut not)) => {
-                    loop {
-                        not = match self.tx_notify.start_send(not) {
-                            Ok(AsyncSink::Ready) => break,
-                            Ok(AsyncSink::NotReady(n)) => n,
-                            Err(_) => {
-                                return Err(io::Error::new(
-                                    io::ErrorKind::Other,
-                                    "cannot send notification",
-                                ))
-                            }
-                        };
-                    }
+                Some(Message::Request(id, req)) => break Ok(Async::Ready(Some((id, req)))),
+                Some(Message::Notification(not)) => {
+                    self.notify(not)?;
                     continue;
                 }
-                Some(_) => {
-                    continue;
-                }
-                None => return Ok(Async::Ready(None)),
+                Some(_) => continue,
+                None => break Ok(Async::Ready(None)),
             }
         }
     }
