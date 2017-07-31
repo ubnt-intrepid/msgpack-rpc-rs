@@ -8,7 +8,7 @@ pub fn into_io_error<E: Into<Box<error::Error + Send + Sync>>>(err: E) -> io::Er
 }
 
 
-pub fn do_send<S: Sink>(sink: &mut Option<S>, item: S::SinkItem) -> Result<(), S::SinkError>
+pub fn do_send<S: Sink>(sink: &mut Option<S>, item: S::SinkItem) -> Result<(), ()>
 where
     S::SinkItem: ::std::fmt::Debug,
 {
@@ -18,6 +18,16 @@ where
             *sink = Some(s);
             Ok(())
         }
-        Err(e) => Err(e),
+        Err(_) => Err(()),
     }
+}
+
+pub fn do_send_cloned<S: Sink + Clone + 'static>(
+    sink: &S,
+    item: S::SinkItem,
+) -> Box<Future<Item = (), Error = ()>> {
+    Box::new(sink.clone().send(item).then(|res| match res {
+        Ok(_) => Ok(()),
+        Err(_) => Err(()),
+    }))
 }

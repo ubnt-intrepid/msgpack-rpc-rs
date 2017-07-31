@@ -26,7 +26,7 @@ pub use self::message::{Message, Request, Response, Notification};
 pub use self::notify::{NotifyServer, NotifyService};
 pub use self::server::{Service, Server};
 
-use futures::{Future, Stream, Sink};
+use futures::{Stream, Sink};
 use futures::sync::mpsc;
 use tokio_core::reactor::Handle;
 use tokio_io::{AsyncRead, AsyncWrite};
@@ -40,8 +40,21 @@ where
     T: AsyncRead + AsyncWrite + 'static,
 {
     let (read, write) = io.split();
+    make_providers_from_pair(read, write, handle)
+}
 
-    // create channels.
+
+/// Create a RPC client and service creators, with given I/O pair.
+pub fn make_providers_from_pair<R, W>(
+    read: R,
+    write: W,
+    handle: &Handle,
+) -> (Client, Server, NotifyServer)
+where
+    R: AsyncRead + 'static,
+    W: AsyncWrite + 'static,
+{
+    // create read/write pairs.
     // TODO: set buffer size
     let (tx_req, rx_req) = mpsc::channel(1);
     let (tx_res, rx_res) = mpsc::channel(1);
@@ -51,35 +64,15 @@ where
     // A background task to receive raw messages.
     // It will send received messages to client/server transports.
     let stream = FramedRead::new(read, Codec).map_err(|_| ());
-    handle.spawn(stream.for_each({
-        move |msg| match msg {
-            Message::Request(id, req) => {
-                tx_req
-                    .clone()
-                    .send((id, req))
-                    .map(|_| ())
-                    .map_err(|_| ())
-                    .boxed()
-            }
-            Message::Response(id, res) => {
-                tx_res
-                    .clone()
-                    .send((id, res))
-                    .map(|_| ())
-                    .map_err(|_| ())
-                    .boxed()
-            }
-            Message::Notification(not) => {
-                tx_not.clone().send(not).map(|_| ()).map_err(|_| ()).boxed()
-            }
-        }
+    handle.spawn(stream.for_each(move |msg| match msg {
+        Message::Request(id, req) => util::do_send_cloned(&tx_req, (id, req)),
+        Message::Response(id, res) => util::do_send_cloned(&tx_res, (id, res)),
+        Message::Notification(not) => util::do_send_cloned(&tx_not, not),
     }));
 
     // A background task to send messages.
     let mut sink = Some(FramedWrite::new(write, Codec).sink_map_err(|_| ()));
-    handle.spawn(rx_select.for_each(move |msg| {
-        util::do_send(&mut sink, msg).map_err(|_| ())
-    }));
+    handle.spawn(rx_select.for_each(move |msg| util::do_send(&mut sink, msg)));
 
     let client = Client::new(handle, rx_res, tx_select.clone());
     let notify = NotifyServer::new(rx_not);
