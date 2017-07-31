@@ -1,5 +1,5 @@
 [package]
-name = "neovim"
+name = "msgpack-rpc"
 version = "0.0.0"
 authors = ["Yusuke Sasaki <yusuke.sasaki.nuem@gmail.com>"]
 
@@ -8,6 +8,9 @@ bytes = "*"
 futures = "*"
 tokio-core = "*"
 tokio-io = "*"
+tokio-proto = "*"
+tokio-service = "*"
 tokio-process = "*"
 
-msgpack-rpc = { path = "../msgpack-rpc" }
+rmp = "*"
+rmpv = "*"
