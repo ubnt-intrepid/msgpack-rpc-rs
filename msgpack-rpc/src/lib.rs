@@ -50,34 +50,27 @@ where
 
     // A background task to receive raw messages.
     // It will send received messages to client/server transports.
-    let stream = FramedRead::new(read, Codec).map_err(|_| ()).map(|msg| {
-        eprintln!("[debug] read: {:?}", msg);
-        msg
-    });
-
+    let stream = FramedRead::new(read, Codec).map_err(|_| ());
     handle.spawn(stream.for_each({
-        move |msg| {
-            eprintln!("[debug] received: {:?}", msg);
-            match msg {
-                Message::Request(id, req) => {
-                    tx_req
-                        .clone()
-                        .send((id, req))
-                        .map(|_| ())
-                        .map_err(|_| ())
-                        .boxed()
-                }
-                Message::Response(id, res) => {
-                    tx_res
-                        .clone()
-                        .send((id, res))
-                        .map(|_| ())
-                        .map_err(|_| ())
-                        .boxed()
-                }
-                Message::Notification(not) => {
-                    tx_not.clone().send(not).map(|_| ()).map_err(|_| ()).boxed()
-                }
+        move |msg| match msg {
+            Message::Request(id, req) => {
+                tx_req
+                    .clone()
+                    .send((id, req))
+                    .map(|_| ())
+                    .map_err(|_| ())
+                    .boxed()
+            }
+            Message::Response(id, res) => {
+                tx_res
+                    .clone()
+                    .send((id, res))
+                    .map(|_| ())
+                    .map_err(|_| ())
+                    .boxed()
+            }
+            Message::Notification(not) => {
+                tx_not.clone().send(not).map(|_| ()).map_err(|_| ()).boxed()
             }
         }
     }));

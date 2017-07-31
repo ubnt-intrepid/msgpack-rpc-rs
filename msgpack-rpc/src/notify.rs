@@ -30,9 +30,8 @@ impl<T> NotifyServer<T> {
         S: NotifyService + 'static,
     {
         let NotifyServer { rx_not, .. } = self;
-        handle.spawn(rx_not.for_each(move |not| {
-            eprintln!("[debug] receive notification: {:?}", not);
-            service.call(not).map_err(|_| ())
-        }));
+        handle.spawn(rx_not.for_each(
+            move |not| service.call(not).map_err(|_| ()),
+        ));
     }
 }

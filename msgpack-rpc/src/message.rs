@@ -237,7 +237,6 @@ impl Decoder for Codec {
         {
             let mut buf = io::Cursor::new(&src);
             res = loop {
-                eprintln!("[debug] in loop decode");
                 match Message::from_reader(&mut buf) {
                     Ok(message) => break Ok(Some(message)),
                     Err(DecodeError::Truncated) => return Ok(None),

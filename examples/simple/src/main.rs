@@ -18,7 +18,6 @@ impl Service for Echo {
     type Error = io::Error;
     type Future = FutureResult<Self::Response, Self::Error>;
     fn call(&self, _: Request) -> Self::Future {
-        eprintln!("[debug] entering in Echo::call()");
         ok(Response::from_ok("Hello"))
     }
 }
@@ -27,8 +26,8 @@ struct Notify;
 impl NotifyService for Notify {
     type Error = io::Error;
     type Future = FutureResult<(), Self::Error>;
-    fn call(&self, _: Notification) -> Self::Future {
-        eprintln!("[debug] entering in Notify::call()");
+    fn call(&self, not: Notification) -> Self::Future {
+        eprintln!("Receive a notification from client: {:?}", not);
         ok(())
     }
 }
