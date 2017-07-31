@@ -15,38 +15,29 @@ extern crate rmpv;
 
 mod client;
 mod message;
+mod notify;
 mod transport;
+mod server;
 mod util;
 
-pub use tokio_service::Service;
 pub use rmpv::Value;
 pub use self::client::Client;
 pub use self::message::{Message, Request, Response, Notification};
+pub use self::notify::{NotifyServer, NotifyService};
+pub use self::server::{Service, Server};
 
-use std::io;
 use futures::{Future, Stream, Sink};
 use futures::sync::mpsc;
 use tokio_core::reactor::Handle;
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_io::codec::{FramedRead, FramedWrite};
-use tokio_proto::BindServer;
 use self::message::Codec;
-use self::transport::{ServerTransport, BidirectionalProto};
 
 
-pub trait NotifyService {
-    type Error;
-    type Future: Future<Item = (), Error = Self::Error>;
-    fn call(&self, not: Notification) -> Self::Future;
-}
-
-
-/// Bind server/notification services and create a RPC client, with given I/O.
-pub fn start_services<T, S, N>(io: T, handle: &Handle, service: S, n_service: N) -> Client<T>
+/// Create a RPC client and service creators, with given I/O.
+pub fn make_providers<T>(io: T, handle: &Handle) -> (Client<T>, Server<T>, NotifyServer<T>)
 where
     T: AsyncRead + AsyncWrite + 'static,
-    S: Service<Request = Request, Response = Response, Error = io::Error> + 'static,
-    N: NotifyService<Error = io::Error> + 'static,
 {
     let (read, write) = io.split();
 
@@ -93,40 +84,13 @@ where
 
     // A background task to send messages.
     let mut sink = Some(FramedWrite::new(write, Codec).sink_map_err(|_| ()));
-    handle.spawn(rx_select.for_each(
-        move |msg| do_send(&mut sink, msg).map_err(|_| ()),
-    ));
-
-    // notification services
-    handle.spawn(rx_not.for_each(move |not| {
-        eprintln!("[debug] receive notification: {:?}", not);
-        n_service.call(not).map_err(|_| ())
+    handle.spawn(rx_select.for_each(move |msg| {
+        util::do_send(&mut sink, msg).map_err(|_| ())
     }));
 
-    // bind server
-    BidirectionalProto.bind_server(
-        handle,
-        ServerTransport {
-            rx_req,
-            tx_select: tx_select.clone(),
-        },
-        service,
-    );
+    let client = Client::new(handle, rx_res, tx_select.clone());
+    let notify = NotifyServer::new(rx_not);
+    let server = Server::new(rx_req, tx_select);
 
-    Client::bind(handle, rx_res, tx_select)
-}
-
-
-fn do_send<S: Sink>(sink: &mut Option<S>, item: S::SinkItem) -> Result<(), S::SinkError>
-where
-    S::SinkItem: ::std::fmt::Debug,
-{
-    let sink_ = sink.take().expect("sink must not be empty.");
-    match sink_.send(item).wait() {
-        Ok(s) => {
-            *sink = Some(s);
-            Ok(())
-        }
-        Err(e) => Err(e),
-    }
+    (client, server, notify)
 }

@@ -20,7 +20,7 @@ pub struct Client<T: AsyncRead + AsyncWrite + 'static> {
 }
 
 impl<T: AsyncRead + AsyncWrite + 'static> Client<T> {
-    pub(super) fn bind(
+    pub(super) fn new(
         handle: &Handle,
         rx_res: Receiver<(u64, Response)>,
         tx_select: Sender<Message>,
@@ -46,7 +46,7 @@ impl<T: AsyncRead + AsyncWrite + 'static> Client<T> {
     }
 
     /// Send a notification message to the server.
-    pub fn notify(&mut self, not: Notification) -> io::Result<()> {
+    pub fn notify(&mut self, not: Notification) {
         self.handle.spawn(
             self.tx_select
                 .clone()
@@ -54,6 +54,5 @@ impl<T: AsyncRead + AsyncWrite + 'static> Client<T> {
                 .map(|_| ())
                 .map_err(|_| ()),
         );
-        Ok(())
     }
 }
