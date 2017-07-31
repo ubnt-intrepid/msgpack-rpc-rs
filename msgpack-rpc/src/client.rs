@@ -1,6 +1,6 @@
 use std::io;
 use std::marker::PhantomData;
-use futures::Future;
+use futures::{Future, Sink};
 use futures::sync::mpsc::{Sender, Receiver};
 use tokio_core::reactor::Handle;
 use tokio_io::{AsyncRead, AsyncWrite};
@@ -10,12 +10,12 @@ use tokio_service::Service;
 
 use super::transport::{ClientTransport, BidirectionalProto};
 use super::message::{Message, Request, Response, Notification};
-use super::util;
 
 
 pub struct Client<T: AsyncRead + AsyncWrite + 'static> {
     inner: ClientService<ClientTransport, BidirectionalProto>,
     tx_select: Sender<Message>,
+    handle: Handle,
     _marker: PhantomData<T>,
 }
 
@@ -35,6 +35,7 @@ impl<T: AsyncRead + AsyncWrite + 'static> Client<T> {
         Client {
             inner,
             tx_select,
+            handle: handle.clone(),
             _marker: PhantomData,
         }
     }
@@ -46,7 +47,13 @@ impl<T: AsyncRead + AsyncWrite + 'static> Client<T> {
 
     /// Send a notification message to the server.
     pub fn notify(&mut self, not: Notification) -> io::Result<()> {
-        util::start_send_until_ready(&mut self.tx_select, Message::Notification(not))
-            .map_err(util::into_io_error)
+        self.handle.spawn(
+            self.tx_select
+                .clone()
+                .send(Message::Notification(not))
+                .map(|_| ())
+                .map_err(|_| ()),
+        );
+        Ok(())
     }
 }
