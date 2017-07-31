@@ -7,6 +7,7 @@
 mod codec;
 mod message;
 mod errors;
+pub mod bidirectional;
 pub mod client;
 pub mod server;
 

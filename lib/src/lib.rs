@@ -13,7 +13,6 @@ extern crate tokio_process;
 extern crate rmp;
 extern crate rmpv;
 
+pub mod io;
 pub mod result;
-pub mod stdio;
-pub mod process;
 pub mod rpc;

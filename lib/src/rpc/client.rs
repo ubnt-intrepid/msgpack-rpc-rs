@@ -2,23 +2,22 @@ use std::io;
 use futures::{Stream, Sink, Poll, Async, AsyncSink, StartSend};
 use tokio_core::reactor::Handle;
 use tokio_io::{AsyncRead, AsyncWrite};
-use tokio_io::codec::Framed;
 use tokio_proto::BindClient;
 use tokio_proto::multiplex::{ClientProto, ClientService};
 use tokio_service::Service;
 
-use super::codec::Codec;
+use super::codec::Transport;
 use super::message::{Message, Request, Response, Notification};
 
 
 // TODO: notification
 pub struct ClientTransport<T> {
-    inner: Framed<T, Codec>,
+    inner: Transport<T>,
 }
 
 impl<T: AsyncRead + AsyncWrite + 'static> ClientTransport<T> {
     pub fn new(io: T) -> Self {
-        ClientTransport { inner: io.framed(Codec) }
+        ClientTransport { inner: io.into() }
     }
 }
 

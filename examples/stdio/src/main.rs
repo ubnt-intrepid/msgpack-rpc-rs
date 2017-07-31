@@ -2,7 +2,7 @@ extern crate neovim;
 extern crate futures;
 extern crate tokio_service;
 
-use neovim::stdio::StdioStream;
+use neovim::io::StdioStream;
 use neovim::rpc::{Request, Response};
 use neovim::rpc::server::Proto as MsgpackRPCProto;
 

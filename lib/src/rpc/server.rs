@@ -6,17 +6,16 @@ use futures::{Stream, Sink, Poll, Async, AsyncSink, StartSend};
 use futures::sync::mpsc;
 use tokio_core::reactor::{Core, Handle};
 use tokio_io::{AsyncRead, AsyncWrite};
-use tokio_io::codec::Framed;
 use tokio_proto::BindServer;
 use tokio_proto::multiplex::ServerProto;
 use tokio_service::NewService;
 
-use super::codec::Codec;
+use super::codec::Transport;
 use super::message::{Message, Request, Response, Notification};
 
 
 pub struct ServerTransport<T> {
-    inner: Framed<T, Codec>,
+    inner: Transport<T>,
     tx_notify: mpsc::Sender<Notification>,
 }
 
@@ -24,7 +23,7 @@ impl<T: AsyncRead + AsyncWrite + 'static> ServerTransport<T> {
     pub fn new(io: T) -> (Self, mpsc::Receiver<Notification>) {
         let (tx_notify, rx_notify) = mpsc::channel(1);
         let transport = ServerTransport {
-            inner: io.framed(Codec),
+            inner: io.into(),
             tx_notify,
         };
         (transport, rx_notify)

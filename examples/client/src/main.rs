@@ -3,9 +3,9 @@ extern crate futures;
 extern crate tokio_core;
 extern crate tokio_service;
 
+use neovim::io::ChildProcessStream;
 use neovim::rpc::Request;
 use neovim::rpc::client::Client;
-use neovim::process::ChildStream;
 
 use std::process::{Command, Stdio};
 use futures::Future;
@@ -17,7 +17,7 @@ fn main() {
     let mut core = Core::new().unwrap();
     let handle = core.handle();
 
-    let stream = ChildStream::from_builder(
+    let stream = ChildProcessStream::from_builder(
         Command::new("nvim")
             .arg("--embed")
             .stdin(Stdio::piped())

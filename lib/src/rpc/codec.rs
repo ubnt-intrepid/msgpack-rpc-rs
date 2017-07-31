@@ -1,6 +1,8 @@
 use std::io;
 use bytes::{BufMut, BytesMut};
-use tokio_io::codec::{Encoder, Decoder};
+use futures::{Stream, Sink, Poll, StartSend};
+use tokio_io::{AsyncRead, AsyncWrite};
+use tokio_io::codec::{Framed, Encoder, Decoder};
 use super::message::Message;
 use super::errors::DecodeError;
 
@@ -37,5 +39,35 @@ impl Decoder for Codec {
         }
         src.split_to(pos);
         res
+    }
+}
+
+pub struct Transport<T>(Framed<T, Codec>);
+
+impl<T: AsyncRead + AsyncWrite + 'static> From<T> for Transport<T> {
+    fn from(io: T) -> Self {
+        Transport(io.framed(Codec))
+    }
+}
+
+impl<T: AsyncRead + AsyncWrite + 'static> Stream for Transport<T> {
+    type Item = Message;
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+        self.0.poll()
+    }
+}
+
+impl<T: AsyncRead + AsyncWrite + 'static> Sink for Transport<T> {
+    type SinkItem = Message;
+    type SinkError = io::Error;
+
+    fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
+        self.0.start_send(item)
+    }
+
+    fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
+        self.0.poll_complete()
     }
 }
