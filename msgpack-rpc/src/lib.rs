@@ -25,6 +25,7 @@ pub use self::message::{Message, Request, Response, Notification};
 
 use std::io;
 use futures::{Future, Stream, Sink};
+use futures::future;
 use futures::sync::mpsc;
 use tokio_core::reactor::Handle;
 use tokio_io::{AsyncRead, AsyncWrite};
@@ -59,26 +60,40 @@ where
 
     // A background task to receive raw messages.
     // It will send received messages to client/server transports.
-    let stream = FramedRead::new(read, Codec).map_err(|_| ());
+    let stream = FramedRead::new(read, Codec).map_err(|_| ())
+        .map(|msg| {
+            eprintln!("[debug] read: {:?}", msg);
+            msg
+        });
     let mut tx_req = tx_req.sink_map_err(|_| ());
     let mut tx_res = tx_res.sink_map_err(|_| ());
     let mut tx_not = tx_not.sink_map_err(|_| ());
-    handle.spawn(stream.for_each(move |msg| match msg {
-        Message::Request(id, req) => util::start_send_until_ready(&mut tx_req, (id, req)),
-        Message::Response(id, res) => util::start_send_until_ready(&mut tx_res, (id, res)),
-        Message::Notification(not) => util::start_send_until_ready(&mut tx_not, not),
+    handle.spawn(stream.for_each(move |msg| {
+        eprintln!("[debug] received: {:?}", msg);
+        match msg {
+            Message::Request(id, req) => util::start_send_until_ready(&mut tx_req, (id, req)),
+            Message::Response(id, res) => util::start_send_until_ready(&mut tx_res, (id, res)),
+            Message::Notification(not) => util::start_send_until_ready(&mut tx_not, not),
+        }
     }));
 
     // A background task to send messages.
-    let mut sink = FramedWrite::new(write, Codec).sink_map_err(|_| ());
+    let mut sink = FramedWrite::new(write, Codec)
+        .sink_map_err(|_| ())
+        .with(|msg| {
+            eprintln!("[debug] write: {:?}", msg);
+            future::ok(msg)
+        });
     handle.spawn(rx_select.for_each(move |msg| {
+        eprintln!("[debug] send: {:?}", msg);
         util::start_send_until_ready(&mut sink, msg)
     }));
 
     // notification services
-    handle.spawn(rx_not.for_each(
-        move |not| n_service.call(not).map_err(|_| ()),
-    ));
+    handle.spawn(rx_not.for_each(move |not| {
+        eprintln!("[debug] receive notification: {:?}", not);
+        n_service.call(not).map_err(|_| ())
+    }));
 
     // bind server
     BidirectionalProto.bind_server(

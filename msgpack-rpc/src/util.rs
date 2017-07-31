@@ -6,10 +6,17 @@ pub fn start_send_until_ready<S: Sink>(
     sink: &mut S,
     mut item: S::SinkItem,
 ) -> Result<(), S::SinkError> {
+    eprintln!("[debug] entering in start_send_until_ready");
     loop {
         item = match sink.start_send(item)? {
-            AsyncSink::Ready => break Ok(()),
-            AsyncSink::NotReady(item) => item,
+            AsyncSink::Ready => {
+                eprintln!("[debug] success to start_send");
+                break Ok(());
+            }
+            AsyncSink::NotReady(item) => {
+                eprintln!("[debug] in loop");
+                item
+            }
         }
     }
 }
