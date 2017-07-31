@@ -22,9 +22,7 @@ impl<T> Stream for ClientTransport<T> {
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        self.rx_res.poll().map_err(|()| {
-            io::Error::new(io::ErrorKind::Other, "rx")
-        })
+        self.rx_res.poll().map_err(|_| into_io_error("rx_res"))
     }
 }
 
@@ -33,12 +31,10 @@ impl<T> Sink for ClientTransport<T> {
     type SinkError = io::Error;
 
     fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
-        match self.tx_select
-            .start_send(Message::Request(item.0, item.1))
-            .map_err(into_io_error)? {
-            AsyncSink::Ready => Ok(AsyncSink::Ready),
-            AsyncSink::NotReady(Message::Request(id, req)) => Ok(AsyncSink::NotReady((id, req))),
-            AsyncSink::NotReady(_) => unreachable!(),
+        match self.tx_select.start_send(item.into()) {
+            Ok(AsyncSink::Ready) => Ok(AsyncSink::Ready),
+            Ok(AsyncSink::NotReady(item)) => Ok(AsyncSink::NotReady(item.into())),
+            Err(err) => Err(into_io_error(err)),
         }
     }
 
@@ -60,9 +56,7 @@ impl<T> Stream for ServerTransport<T> {
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        self.rx_req.poll().map_err(|()| {
-            io::Error::new(io::ErrorKind::Other, "rx")
-        })
+        self.rx_req.poll().map_err(|()| into_io_error("rx"))
     }
 }
 
@@ -71,12 +65,10 @@ impl<T> Sink for ServerTransport<T> {
     type SinkError = io::Error;
 
     fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
-        match self.tx_select
-            .start_send(Message::Response(item.0, item.1))
-            .map_err(into_io_error)? {
-            AsyncSink::Ready => Ok(AsyncSink::Ready),
-            AsyncSink::NotReady(Message::Response(id, res)) => Ok(AsyncSink::NotReady((id, res))),
-            AsyncSink::NotReady(_) => unreachable!(),
+        match self.tx_select.start_send(item.into()) {
+            Ok(AsyncSink::Ready) => Ok(AsyncSink::Ready),
+            Ok(AsyncSink::NotReady(item)) => Ok(AsyncSink::NotReady(item.into())),
+            Err(err) => Err(into_io_error(err)),
         }
     }
 
@@ -164,6 +156,6 @@ fn start_send_until_ready<S: Sink>(
     }
 }
 
-fn into_io_error<E: error::Error>(err: E) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, format!("{:?}", err))
+fn into_io_error<E: Into<Box<error::Error + Send + Sync>>>(err: E) -> io::Error {
+    io::Error::new(io::ErrorKind::Other, err)
 }

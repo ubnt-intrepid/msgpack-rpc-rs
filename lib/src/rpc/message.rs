@@ -39,6 +39,52 @@ impl Message {
     }
 }
 
+impl Into<(u64, Request)> for Message {
+    fn into(self) -> (u64, Request) {
+        match self {
+            Message::Request(id, req) => (id, req),
+            _ => panic!("invalid vairiant"),
+        }
+    }
+}
+
+impl Into<(u64, Response)> for Message {
+    fn into(self) -> (u64, Response) {
+        match self {
+            Message::Response(id, res) => (id, res),
+            _ => panic!("invalid vairiant"),
+        }
+    }
+}
+
+impl Into<Notification> for Message {
+    fn into(self) -> Notification {
+        match self {
+            Message::Notification(not) => not,
+            _ => panic!("invalid vairiant"),
+        }
+    }
+}
+
+impl From<(u64, Request)> for Message {
+    fn from(val: (u64, Request)) -> Message {
+        Message::Request(val.0, val.1)
+    }
+}
+
+impl From<(u64, Response)> for Message {
+    fn from(val: (u64, Response)) -> Message {
+        Message::Response(val.0, val.1)
+    }
+}
+
+impl From<Notification> for Message {
+    fn from(val: Notification) -> Message {
+        Message::Notification(val)
+    }
+}
+
+
 
 /// A request message
 #[derive(Debug)]
