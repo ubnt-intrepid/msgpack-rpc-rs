@@ -1,104 +1,52 @@
 use std::io;
-use futures::{Stream, Sink, Poll, Async, AsyncSink, StartSend};
+use std::marker::PhantomData;
+use futures::Future;
+use futures::sync::mpsc::{Sender, Receiver};
 use tokio_core::reactor::Handle;
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_proto::BindClient;
-use tokio_proto::multiplex::{ClientProto, ClientService};
+use tokio_proto::multiplex::ClientService;
 use tokio_service::Service;
 
-use super::codec::Transport;
+use super::transport::{ClientTransport, BidirectionalProto};
 use super::message::{Message, Request, Response, Notification};
-
-
-// TODO: notification
-pub struct ClientTransport<T> {
-    inner: Transport<T>,
-}
-
-impl<T: AsyncRead + AsyncWrite + 'static> ClientTransport<T> {
-    pub fn new(io: T) -> Self {
-        ClientTransport { inner: io.into() }
-    }
-}
-
-impl<T: AsyncRead + AsyncWrite + 'static> Stream for ClientTransport<T> {
-    type Item = (u64, Response);
-    type Error = io::Error;
-
-    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        match try_ready!(self.inner.poll()) {
-            Some(Message::Response(id, res)) => Ok(Async::Ready(Some((id, res)))),
-            Some(_) => Ok(Async::NotReady),
-            None => Ok(Async::Ready(None)),
-        }
-    }
-}
-
-impl<T: AsyncRead + AsyncWrite + 'static> Sink for ClientTransport<T> {
-    type SinkItem = (u64, Request);
-    type SinkError = io::Error;
-
-    fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
-        match self.inner.start_send(Message::Request(item.0, item.1)) {
-            Ok(AsyncSink::Ready) => Ok(AsyncSink::Ready),
-            Ok(AsyncSink::NotReady(Message::Request(id, req))) => Ok(
-                AsyncSink::NotReady((id, req)),
-            ),
-            Ok(AsyncSink::NotReady(_)) => unreachable!(),
-            Err(err) => Err(err),
-        }
-    }
-
-    fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
-        self.inner.poll_complete()
-    }
-}
-
-
-pub struct Proto;
-
-impl<T: AsyncRead + AsyncWrite + 'static> ClientProto<ClientTransport<T>> for Proto {
-    type Request = Request;
-    type Response = Response;
-    type Transport = ClientTransport<T>;
-    type BindTransport = Result<Self::Transport, io::Error>;
-
-    fn bind_transport(&self, io: ClientTransport<T>) -> Self::BindTransport {
-        Ok(io)
-    }
-}
+use super::util;
 
 
 pub struct Client<T: AsyncRead + AsyncWrite + 'static> {
-    inner: ClientService<ClientTransport<T>, Proto>,
+    inner: ClientService<ClientTransport, BidirectionalProto>,
+    tx_select: Sender<Message>,
+    _marker: PhantomData<T>,
 }
 
 impl<T: AsyncRead + AsyncWrite + 'static> Client<T> {
-    pub fn new(stream: T, handle: &Handle) -> Self {
-        let transport = ClientTransport::new(stream);
-        let inner = Proto.bind_client(handle, transport);
-        Client { inner }
+    pub(super) fn bind(
+        handle: &Handle,
+        rx_res: Receiver<(u64, Response)>,
+        tx_select: Sender<Message>,
+    ) -> Self {
+        let inner = BidirectionalProto.bind_client(
+            handle,
+            ClientTransport {
+                rx_res,
+                tx_select: tx_select.clone(),
+            },
+        );
+        Client {
+            inner,
+            tx_select,
+            _marker: PhantomData,
+        }
     }
 
     /// Send a request message to the server, and return a future of its response.
-    #[cfg_attr(rustfmt, rustfmt_skip)]
-    pub fn request(&self, req: Request) -> <ClientService<ClientTransport<T>, Proto> as Service>::Future {
-        self.inner.call(req)
+    pub fn request(&self, req: Request) -> Box<Future<Item = Response, Error = io::Error>> {
+        Box::new(self.inner.call(req))
     }
 
     /// Send a notification message to the server.
-    pub fn notify(&self, _not: Notification) {
-        // TODO: implement
-    }
-}
-
-impl<T: AsyncRead + AsyncWrite + 'static> Service for Client<T> {
-    type Request = Request;
-    type Response = Response;
-    type Error = io::Error;
-    type Future = <ClientService<ClientTransport<T>, Proto> as Service>::Future;
-
-    fn call(&self, req: Self::Request) -> Self::Future {
-        self.request(req)
+    pub fn notify(&mut self, not: Notification) -> io::Result<()> {
+        util::start_send_until_ready(&mut self.tx_select, Message::Notification(not))
+            .map_err(util::into_io_error)
     }
 }
