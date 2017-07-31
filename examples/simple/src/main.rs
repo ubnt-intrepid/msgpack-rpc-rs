@@ -4,7 +4,7 @@ extern crate futures;
 extern crate tokio_core;
 
 use neovim::io::ChildProcessStream;
-use msgpack_rpc::{Request, Response, Notification, Service, NotifyService, make_providers};
+use msgpack_rpc::{Request, Response, Notification, Service, Client, NotifyService, make_providers};
 use std::io;
 use std::process::{Command, Stdio};
 use futures::Future;
@@ -22,7 +22,7 @@ impl Service for Echo {
     }
 }
 
-struct Notify;
+struct Notify(Client);
 impl NotifyService for Notify {
     type Error = io::Error;
     type Future = FutureResult<(), Self::Error>;
@@ -48,7 +48,7 @@ fn main() {
 
     let (client, server, notify) = make_providers(stream, &handle);
     server.serve(&handle, Echo);
-    notify.serve(&handle, Notify);
+    notify.serve(&handle, Notify(client.clone()));
 
     let task = client
         .request(Request::new("vim_get_api_info", vec![]))

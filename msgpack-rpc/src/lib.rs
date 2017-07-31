@@ -35,7 +35,7 @@ use self::message::Codec;
 
 
 /// Create a RPC client and service creators, with given I/O.
-pub fn make_providers<T>(io: T, handle: &Handle) -> (Client<T>, Server<T>, NotifyServer<T>)
+pub fn make_providers<T>(io: T, handle: &Handle) -> (Client, Server, NotifyServer)
 where
     T: AsyncRead + AsyncWrite + 'static,
 {

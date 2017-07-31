@@ -1,4 +1,3 @@
-use std::marker::PhantomData;
 use futures::{Future, Stream};
 use futures::sync::mpsc::Receiver;
 use tokio_core::reactor::Handle;
@@ -12,17 +11,13 @@ pub trait NotifyService {
 }
 
 
-pub struct NotifyServer<T> {
+pub struct NotifyServer {
     rx_not: Receiver<Notification>,
-    _marker: PhantomData<T>,
 }
 
-impl<T> NotifyServer<T> {
+impl NotifyServer {
     pub(super) fn new(rx_not: Receiver<Notification>) -> Self {
-        NotifyServer {
-            rx_not,
-            _marker: PhantomData,
-        }
+        NotifyServer { rx_not }
     }
 
     pub fn serve<S>(self, handle: &Handle, service: S)

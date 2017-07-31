@@ -1,5 +1,4 @@
 use std::io;
-use std::marker::PhantomData;
 use futures::sync::mpsc::{Sender, Receiver};
 use tokio_core::reactor::Handle;
 use tokio_proto::BindServer;
@@ -11,19 +10,14 @@ use super::transport::ServerTransport;
 pub use tokio_service::Service;
 
 
-pub struct Server<T> {
+pub struct Server {
     rx_req: Receiver<(u64, Request)>,
     tx_select: Sender<Message>,
-    _marker: PhantomData<T>,
 }
 
-impl<T> Server<T> {
+impl Server {
     pub(super) fn new(rx_req: Receiver<(u64, Request)>, tx_select: Sender<Message>) -> Self {
-        Server {
-            rx_req,
-            tx_select,
-            _marker: PhantomData,
-        }
+        Server { rx_req, tx_select }
     }
 
     pub fn serve<S>(self, handle: &Handle, service: S)

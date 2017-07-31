@@ -1,9 +1,7 @@
 use std::io;
-use std::marker::PhantomData;
 use futures::{Future, Sink};
 use futures::sync::mpsc::{Sender, Receiver};
 use tokio_core::reactor::Handle;
-use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_proto::BindClient;
 use tokio_proto::multiplex::ClientService;
 use tokio_service::Service;
@@ -12,14 +10,14 @@ use super::transport::{ClientTransport, BidirectionalProto};
 use super::message::{Message, Request, Response, Notification};
 
 
-pub struct Client<T: AsyncRead + AsyncWrite + 'static> {
+#[derive(Clone)]
+pub struct Client {
     inner: ClientService<ClientTransport, BidirectionalProto>,
     tx_select: Sender<Message>,
     handle: Handle,
-    _marker: PhantomData<T>,
 }
 
-impl<T: AsyncRead + AsyncWrite + 'static> Client<T> {
+impl Client {
     pub(super) fn new(
         handle: &Handle,
         rx_res: Receiver<(u64, Response)>,
@@ -36,7 +34,6 @@ impl<T: AsyncRead + AsyncWrite + 'static> Client<T> {
             inner,
             tx_select,
             handle: handle.clone(),
-            _marker: PhantomData,
         }
     }
 
