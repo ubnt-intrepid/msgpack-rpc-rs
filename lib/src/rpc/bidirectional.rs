@@ -86,8 +86,8 @@ where
     T: AsyncRead + AsyncWrite + 'static,
 {
     // TODO: set buffer size
-    let (mut tx_req, rx_req) = mpsc::channel(1);
-    let (mut tx_res, rx_res) = mpsc::channel(1);
+    let (tx_req, rx_req) = mpsc::channel(1);
+    let (tx_res, rx_res) = mpsc::channel(1);
     let (tx_select, rx_select) = mpsc::channel(1);
 
     let client = ClientTransport {
@@ -103,42 +103,27 @@ where
     };
 
     let (read, write) = io.split();
-    let stream = FramedRead::new(read, Codec);
-    let mut sink = FramedWrite::new(write, Codec);
+    let stream = FramedRead::new(read, Codec).map_err(|_| ());
+    let mut sink = FramedWrite::new(write, Codec).sink_map_err(|_| ());
+
+    let mut tx_req = tx_req.sink_map_err(|_| ());
+    let mut tx_res = tx_res.sink_map_err(|_| ());
 
     // A background task to receive raw messages.
     // It will send received messages to client/server transports.
-    // TODO: treat notification message
-    handle.spawn(stream.map_err(|_| ()).for_each(
-        move |msg| -> Result<(), ()> {
-            match msg {
-                Message::Request(id, req) => {
-                    start_send_until_ready(&mut tx_req, (id, req)).map_err(
-                        |_| (),
-                    )?;
-                }
-                Message::Response(id, res) => {
-                    start_send_until_ready(&mut tx_res, (id, res)).map_err(
-                        |_| (),
-                    )?;
-                }
-                Message::Notification(_not) => (),
-            }
-            Ok(())
-        },
-    ));
+    handle.spawn(stream.for_each(move |msg| {
+        // TODO: treat notification message
+        match msg {
+            Message::Request(id, req) => start_send_until_ready(&mut tx_req, (id, req)),
+            Message::Response(id, res) => start_send_until_ready(&mut tx_res, (id, res)),
+            Message::Notification(_not) => Ok(()),
+        }
+    }));
 
     // A background task to send messages.
-    handle.spawn(rx_select.map_err(|_| ()).for_each(move |msg| {
-        fn loop_fn<S: Sink<SinkItem = Message>>(sink: &mut S, msg: Message) -> Result<(), ()> {
-            match sink.start_send(msg) {
-                Ok(AsyncSink::Ready) => Ok(()),
-                Ok(AsyncSink::NotReady(msg)) => loop_fn(sink, msg),
-                Err(_) => return Err(()),
-            }
-        }
-        loop_fn(&mut sink, msg)
-    }));
+    handle.spawn(rx_select.for_each(
+        move |msg| start_send_until_ready(&mut sink, msg),
+    ));
 
     (client, server)
 }
