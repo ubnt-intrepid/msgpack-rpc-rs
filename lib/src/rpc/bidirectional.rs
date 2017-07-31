@@ -1,23 +1,26 @@
 use std::error;
 use std::io;
 use std::marker::PhantomData;
-use futures::{Stream, Sink, Poll, AsyncSink, StartSend};
+
+use futures::{Future, Stream, Sink, Poll, AsyncSink, StartSend};
 use futures::sync::mpsc;
 use tokio_core::reactor::Handle;
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_io::codec::{FramedRead, FramedWrite};
+use tokio_proto::{BindClient, BindServer};
+use tokio_proto::multiplex::{ClientProto, ClientService, ServerProto};
+use tokio_service::Service;
 
 use super::codec::Codec;
-use super::message::{Message, Request, Response};
+use super::message::{Message, Request, Response, Notification};
 
 
-pub struct ClientTransport<T> {
+pub struct ClientTransport {
     rx_res: mpsc::Receiver<(u64, Response)>,
     tx_select: mpsc::Sender<Message>,
-    _marker: PhantomData<T>,
 }
 
-impl<T> Stream for ClientTransport<T> {
+impl Stream for ClientTransport {
     type Item = (u64, Response);
     type Error = io::Error;
 
@@ -26,7 +29,7 @@ impl<T> Stream for ClientTransport<T> {
     }
 }
 
-impl<T> Sink for ClientTransport<T> {
+impl Sink for ClientTransport {
     type SinkItem = (u64, Request);
     type SinkError = io::Error;
 
@@ -45,13 +48,12 @@ impl<T> Sink for ClientTransport<T> {
 
 
 
-pub struct ServerTransport<T> {
+pub struct ServerTransport {
     rx_req: mpsc::Receiver<(u64, Request)>,
     tx_select: mpsc::Sender<Message>,
-    _marker: PhantomData<T>,
 }
 
-impl<T> Stream for ServerTransport<T> {
+impl Stream for ServerTransport {
     type Item = (u64, Request);
     type Error = io::Error;
 
@@ -60,7 +62,7 @@ impl<T> Stream for ServerTransport<T> {
     }
 }
 
-impl<T> Sink for ServerTransport<T> {
+impl Sink for ServerTransport {
     type SinkItem = (u64, Response);
     type SinkError = io::Error;
 
@@ -78,55 +80,122 @@ impl<T> Sink for ServerTransport<T> {
 }
 
 
+pub struct BidirectionalProto;
+
+impl ClientProto<ClientTransport> for BidirectionalProto {
+    type Request = Request;
+    type Response = Response;
+    type Transport = ClientTransport;
+    type BindTransport = io::Result<Self::Transport>;
+    fn bind_transport(&self, transport: ClientTransport) -> Self::BindTransport {
+        Ok(transport)
+    }
+}
+
+impl ServerProto<ServerTransport> for BidirectionalProto {
+    type Request = Request;
+    type Response = Response;
+    type Transport = ServerTransport;
+    type BindTransport = io::Result<Self::Transport>;
+    fn bind_transport(&self, transport: ServerTransport) -> Self::BindTransport {
+        Ok(transport)
+    }
+}
+
+
+pub struct Client<T: AsyncRead + AsyncWrite + 'static> {
+    inner: ClientService<ClientTransport, BidirectionalProto>,
+    tx_select: mpsc::Sender<Message>,
+    _marker: PhantomData<T>,
+}
+
+impl<T: AsyncRead + AsyncWrite + 'static> Client<T> {
+    /// Send a request message to the server, and return a future of its response.
+    pub fn request(&self, req: Request) -> Box<Future<Item = Response, Error = io::Error>> {
+        Box::new(self.inner.call(req))
+    }
+
+    /// Send a notification message to the server.
+    pub fn notify(&mut self, not: Notification) -> io::Result<()> {
+        start_send_until_ready(&mut self.tx_select, Message::Notification(not))
+            .map_err(into_io_error)
+    }
+}
+
+
+pub trait NotifyService {
+    type Error;
+    type Future: Future<Item = (), Error = Self::Error>;
+    fn call(&self, not: Notification) -> Self::Future;
+}
+
+
 /// Create a pair of client-side / server-side transports from given asynchronous I/O.
 ///
 /// Note that this function will spawn some background task.
-pub fn make_transports<T>(io: T, handle: &Handle) -> (ClientTransport<T>, ServerTransport<T>)
+pub fn start_services<T, S, N>(io: T, handle: &Handle, service: S, n_service: N) -> Client<T>
 where
     T: AsyncRead + AsyncWrite + 'static,
+    S: Service<Request = Request, Response = Response, Error = io::Error> + 'static,
+    N: NotifyService<Error = io::Error> + 'static,
 {
+    let (read, write) = io.split();
+
+    // create channels.
     // TODO: set buffer size
     let (tx_req, rx_req) = mpsc::channel(1);
     let (tx_res, rx_res) = mpsc::channel(1);
+    let (tx_not, rx_not) = mpsc::channel(1);
     let (tx_select, rx_select) = mpsc::channel(1);
-
-    let client = ClientTransport {
-        rx_res,
-        tx_select: tx_select.clone(),
-        _marker: PhantomData,
-    };
-
-    let server = ServerTransport {
-        rx_req,
-        tx_select: tx_select.clone(),
-        _marker: PhantomData,
-    };
-
-    let (read, write) = io.split();
-    let stream = FramedRead::new(read, Codec).map_err(|_| ());
-    let mut sink = FramedWrite::new(write, Codec).sink_map_err(|_| ());
-
-    let mut tx_req = tx_req.sink_map_err(|_| ());
-    let mut tx_res = tx_res.sink_map_err(|_| ());
 
     // A background task to receive raw messages.
     // It will send received messages to client/server transports.
-    handle.spawn(stream.for_each(move |msg| {
-        // TODO: treat notification message
-        match msg {
-            Message::Request(id, req) => start_send_until_ready(&mut tx_req, (id, req)),
-            Message::Response(id, res) => start_send_until_ready(&mut tx_res, (id, res)),
-            Message::Notification(_not) => Ok(()),
-        }
+    let stream = FramedRead::new(read, Codec).map_err(|_| ());
+    let mut tx_req = tx_req.sink_map_err(|_| ());
+    let mut tx_res = tx_res.sink_map_err(|_| ());
+    let mut tx_not = tx_not.sink_map_err(|_| ());
+    handle.spawn(stream.for_each(move |msg| match msg {
+        Message::Request(id, req) => start_send_until_ready(&mut tx_req, (id, req)),
+        Message::Response(id, res) => start_send_until_ready(&mut tx_res, (id, res)),
+        Message::Notification(not) => start_send_until_ready(&mut tx_not, not),
     }));
 
     // A background task to send messages.
+    let mut sink = FramedWrite::new(write, Codec).sink_map_err(|_| ());
     handle.spawn(rx_select.for_each(
         move |msg| start_send_until_ready(&mut sink, msg),
     ));
 
-    (client, server)
+    // notification services
+    handle.spawn(rx_not.for_each(
+        move |not| n_service.call(not).map_err(|_| ()),
+    ));
+
+    // bind server
+    BidirectionalProto.bind_server(
+        handle,
+        ServerTransport {
+            rx_req,
+            tx_select: tx_select.clone(),
+        },
+        service,
+    );
+
+    // create an instance of ClientService
+    let inner = BidirectionalProto.bind_client(
+        handle,
+        ClientTransport {
+            rx_res,
+            tx_select: tx_select.clone(),
+        },
+    );
+    Client {
+        inner,
+        tx_select,
+        _marker: PhantomData,
+    }
 }
+
 
 
 fn start_send_until_ready<S: Sink>(
