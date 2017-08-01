@@ -22,8 +22,8 @@ pub use self::client::Client;
 pub use self::message::{Message, Request, Response, Notification};
 pub use self::endpoint::{Endpoint, Service, NotifyService};
 
-use futures::{Stream, Sink};
-use futures::sync::mpsc;
+use futures::{Future, Stream, Sink};
+use futures::sync::mpsc::{self, Sender};
 use tokio_core::reactor::Handle;
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_io::codec::{FramedRead, FramedWrite};
@@ -46,28 +46,49 @@ where
     R: AsyncRead + 'static,
     W: AsyncWrite + 'static,
 {
-    // create read/write pairs.
     // TODO: set buffer size
-    let (tx_req, rx_req) = mpsc::channel(1);
-    let (tx_res, rx_res) = mpsc::channel(1);
-    let (tx_not, rx_not) = mpsc::channel(1);
-    let (tx_select, rx_select) = mpsc::channel(1);
 
     // A background task to receive raw messages.
     // It will send received messages to client/server transports.
+    let (tx_req, rx_req) = mpsc::channel(1);
+    let (tx_res, rx_res) = mpsc::channel(1);
+    let (tx_not, rx_not) = mpsc::channel(1);
+    let mux = Multiplexer::new(tx_req, tx_res, tx_not);
     let stream = FramedRead::new(read, Codec).map_err(|_| ());
-    handle.spawn(stream.for_each(move |msg| match msg {
-        Message::Request(id, req) => util::do_send_cloned(&tx_req, (id, req)),
-        Message::Response(id, res) => util::do_send_cloned(&tx_res, (id, res)),
-        Message::Notification(not) => util::do_send_cloned(&tx_not, not),
-    }));
+    handle.spawn(stream.for_each(move |msg| mux.send(msg)));
 
     // A background task to send messages.
-    let mut sink = Some(FramedWrite::new(write, Codec).sink_map_err(|_| ()));
-    handle.spawn(rx_select.for_each(move |msg| util::do_send(&mut sink, msg)));
+    let (tx_select, rx_select) = mpsc::channel(1);
+    let sink = FramedWrite::new(write, Codec).sink_map_err(|_| ());
+    handle.spawn(sink.send_all(rx_select).map(|_| ()));
 
     let client = Client::new(handle, rx_res, tx_select.clone());
     let endpoint = Endpoint::new(rx_req, tx_select, rx_not);
 
     (client, endpoint)
+}
+
+
+struct Multiplexer {
+    req: Sender<(u64, Request)>,
+    res: Sender<(u64, Response)>,
+    not: Sender<Notification>,
+}
+
+impl Multiplexer {
+    fn new(
+        req: Sender<(u64, Request)>,
+        res: Sender<(u64, Response)>,
+        not: Sender<Notification>,
+    ) -> Self {
+        Multiplexer { req, res, not }
+    }
+
+    fn send(&self, msg: Message) -> Box<Future<Item = (), Error = ()>> {
+        match msg {
+            Message::Request(id, req) => util::do_send_cloned(&self.req, (id, req)),
+            Message::Response(id, res) => util::do_send_cloned(&self.res, (id, res)),
+            Message::Notification(not) => util::do_send_cloned(&self.not, not),
+        }
+    }
 }
