@@ -4,72 +4,23 @@ use std::thread;
 
 use bytes::BytesMut;
 use futures::{Future, Stream, Sink, Poll, Async};
-use futures::sync::{mpsc, oneshot};
+use futures::sync::mpsc;
 use tokio_io::{AsyncRead, AsyncWrite};
 
 
-pub struct StdioStream {
+pub struct Stdin {
     rx_stdin: mpsc::Receiver<io::Result<Vec<u8>>>,
     buffer: BytesMut,
-    is_finished: bool,
-    stdout: Stdout,
+    eof: bool,
 }
 
-impl StdioStream {
-    pub fn new(chunk_size: usize) -> (Self, oneshot::Receiver<()>) {
-        assert!(chunk_size > 0);
-
-        let (tx_stdin, rx_stdin) = mpsc::channel(0);
-        let (tx_finish, rx_finish) = oneshot::channel::<()>();
-        thread::spawn(move || Self::stdin_loop(tx_stdin, tx_finish, chunk_size));
-
-        let stdout = io::stdout();
-        let buffer = BytesMut::new();
-
-        let stream = StdioStream {
-            rx_stdin,
-            buffer,
-            is_finished: false,
-            stdout,
-        };
-        (stream, rx_finish)
-    }
-
-    fn stdin_loop(
-        mut tx_stdin: mpsc::Sender<io::Result<Vec<u8>>>,
-        tx_finish: oneshot::Sender<()>,
-        chunk_size: usize,
-    ) {
-        let stdin = io::stdin();
-        let mut locked_stdin = stdin.lock();
-        loop {
-            let mut bytes = vec![0u8; chunk_size];
-            match locked_stdin.read(&mut bytes) {
-                Ok(n_bytes) => {
-                    bytes.truncate(n_bytes);
-                    match tx_stdin.send(Ok(bytes)).wait() {
-                        Ok(t) => tx_stdin = t,
-                        Err(_) => break,
-                    }
-                }
-                Err(err) => {
-                    let _ = tx_stdin.send(Err(err)).wait();
-                    break;
-                }
-            }
-        }
-        let _ = tx_finish.send(());
-    }
-}
-
-impl Read for StdioStream {
+impl Read for Stdin {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if self.is_finished {
+        if self.eof {
             return Ok(0);
         }
 
         if self.buffer.len() > 0 {
-            // read from buffer.
             let len = cmp::min(self.buffer.len(), buf.len());
             buf[0..len].copy_from_slice(&self.buffer[0..len]);
             self.buffer.split_to(len);
@@ -89,7 +40,7 @@ impl Read for StdioStream {
             }
             Ok(Async::Ready(Some(Err(err)))) => Err(err),
             Ok(Async::Ready(None)) => {
-                self.is_finished = true;
+                self.eof = true;
                 Ok(0)
             }
             Ok(Async::NotReady) => Err(io::Error::new(io::ErrorKind::WouldBlock, "Not ready")),
@@ -97,6 +48,62 @@ impl Read for StdioStream {
         }
     }
 }
+
+impl AsyncRead for Stdin {}
+
+pub fn stdin(chunk_size: usize) -> Stdin {
+    assert!(chunk_size > 0);
+
+    let (mut tx_stdin, rx_stdin) = mpsc::channel(0);
+    thread::spawn(move || {
+        let stdin = io::stdin();
+        let mut locked_stdin = stdin.lock();
+        loop {
+            let mut bytes = vec![0u8; chunk_size];
+            match locked_stdin.read(&mut bytes) {
+                Ok(n_bytes) => {
+                    bytes.truncate(n_bytes);
+                    match tx_stdin.send(Ok(bytes)).wait() {
+                        Ok(t) => tx_stdin = t,
+                        Err(_) => break,
+                    }
+                }
+                Err(err) => {
+                    let _ = tx_stdin.send(Err(err)).wait();
+                    break;
+                }
+            }
+        }
+    });
+
+    Stdin {
+        rx_stdin,
+        buffer: BytesMut::new(),
+        eof: false,
+    }
+}
+
+
+pub struct StdioStream {
+    stdin: Stdin,
+    stdout: Stdout,
+}
+
+impl StdioStream {
+    pub fn new(chunk_size: usize) -> Self {
+        let stdin = stdin(chunk_size);
+        let stdout = io::stdout();
+        StdioStream { stdin, stdout }
+    }
+}
+
+impl Read for StdioStream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.stdin.read(buf)
+    }
+}
+
+impl AsyncRead for StdioStream {}
 
 impl Write for StdioStream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
@@ -107,8 +114,6 @@ impl Write for StdioStream {
         self.stdout.flush()
     }
 }
-
-impl AsyncRead for StdioStream {}
 
 impl AsyncWrite for StdioStream {
     fn shutdown(&mut self) -> Poll<(), io::Error> {

@@ -9,7 +9,7 @@ use std::io;
 use std::time::Duration;
 use std::thread;
 use futures::Future;
-use futures::future::{ok, FutureResult};
+use futures::future::{empty, ok, FutureResult};
 use futures::sync::oneshot;
 use tokio_core::reactor::Core;
 
@@ -59,6 +59,7 @@ impl Service for Handler {
 
 struct Dummy;
 impl NotifyService for Dummy {
+    type Item = Notification;
     type Error = io::Error;
     type Future = FutureResult<(), Self::Error>;
     fn call(&self, _not: Notification) -> Self::Future {
@@ -71,9 +72,9 @@ fn main() {
     let mut core = Core::new().unwrap();
     let handle = core.handle();
 
-    let (stream, rx_stdin) = StdioStream::new(4);
+    let stream = StdioStream::new(4);
     let (_client, endpoint) = make_providers(stream, &handle);
     endpoint.serve(&handle, Handler, Dummy);
 
-    core.run(rx_stdin).unwrap();
+    core.run(empty::<(),()>()).unwrap();
 }
