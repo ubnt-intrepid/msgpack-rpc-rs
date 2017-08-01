@@ -4,7 +4,8 @@ extern crate futures;
 extern crate tokio_core;
 
 use neovim::io::StdioStream;
-use msgpack_rpc::{Request, Response, Service, make_providers};
+use msgpack_rpc::{Request, Response, Notification, Service, NotifyService, make_providers};
+use std::cell::RefCell;
 use std::io;
 use std::time::Duration;
 use std::thread;
@@ -57,13 +58,37 @@ impl Service for Handler {
 }
 
 
+struct Notify(RefCell<Option<oneshot::Sender<()>>>);
+impl NotifyService for Notify {
+    type Error = io::Error;
+    type Future = Box<Future<Item = (), Error = Self::Error>>;
+    fn call(&self, not: Notification) -> Self::Future {
+        eprintln!("[debug] notification: {:?}", not);
+        match not.method.as_str() {
+            "0:function:shutdown" => {
+                let tx = self.0.borrow_mut().take().unwrap();
+                tx.send(()).unwrap();
+                Box::new(ok(()))
+            }
+            m => {
+                eprintln!("[debug] no such notification method: {:?}", m);
+                Box::new(ok(()))
+            }
+        }
+    }
+}
+
+
 fn main() {
     let mut core = Core::new().unwrap();
     let handle = core.handle();
 
     let (stream, rx_stdin) = StdioStream::new(4);
-    let (_client, server, _notify) = make_providers(stream, &handle);
+    let (_client, server, notify) = make_providers(stream, &handle);
     server.serve(&handle, Handler);
 
-    core.run(rx_stdin).unwrap();
+    let (tx_shutdown, rx_shutdown) = oneshot::channel();
+    notify.serve(&handle, Notify(RefCell::new(Some(tx_shutdown))));
+
+    core.run(rx_stdin.select(rx_shutdown)).unwrap();
 }
