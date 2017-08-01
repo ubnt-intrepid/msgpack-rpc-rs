@@ -4,12 +4,12 @@ extern crate futures;
 extern crate tokio_core;
 
 use neovim::io::StdioStream;
-use msgpack_rpc::{Request, Response, Service,  make_providers};
+use msgpack_rpc::{Request, Response, Notification, Service, NotifyService, make_providers};
 use std::io;
 use std::time::Duration;
 use std::thread;
 use futures::Future;
-use futures::future::ok;
+use futures::future::{ok, FutureResult};
 use futures::sync::oneshot;
 use tokio_core::reactor::Core;
 
@@ -57,13 +57,23 @@ impl Service for Handler {
 }
 
 
+struct Dummy;
+impl NotifyService for Dummy {
+    type Error = io::Error;
+    type Future = FutureResult<(), Self::Error>;
+    fn call(&self, _not: Notification) -> Self::Future {
+        ok(())
+    }
+}
+
+
 fn main() {
     let mut core = Core::new().unwrap();
     let handle = core.handle();
 
     let (stream, rx_stdin) = StdioStream::new(4);
-    let (_client, server, _notify) = make_providers(stream, &handle);
-    server.serve(&handle, Handler);
+    let (_client, endpoint) = make_providers(stream, &handle);
+    endpoint.serve(&handle, Handler, Dummy);
 
     core.run(rx_stdin).unwrap();
 }
