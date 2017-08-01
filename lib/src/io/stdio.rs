@@ -51,10 +51,10 @@ impl Read for Stdin {
 
 impl AsyncRead for Stdin {}
 
-pub fn stdin(chunk_size: usize) -> Stdin {
+pub fn stdin(chunk_size: usize, buffer_len: usize) -> Stdin {
     assert!(chunk_size > 0);
 
-    let (mut tx_stdin, rx_stdin) = mpsc::channel(0);
+    let (mut tx_stdin, rx_stdin) = mpsc::channel(buffer_len);
     thread::spawn(move || {
         let stdin = io::stdin();
         let mut locked_stdin = stdin.lock();
@@ -90,8 +90,8 @@ pub struct StdioStream {
 }
 
 impl StdioStream {
-    pub fn new(chunk_size: usize) -> Self {
-        let stdin = stdin(chunk_size);
+    pub fn new(chunk_size: usize, buffer_len: usize) -> Self {
+        let stdin = stdin(chunk_size, buffer_len);
         let stdout = io::stdout();
         StdioStream { stdin, stdout }
     }

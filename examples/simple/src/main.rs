@@ -72,9 +72,9 @@ fn main() {
     let mut core = Core::new().unwrap();
     let handle = core.handle();
 
-    let stream = StdioStream::new(4);
+    let stream = StdioStream::new(4, 4);
     let (_client, endpoint) = make_providers(stream, &handle);
     endpoint.serve(&handle, Handler, Dummy);
 
-    core.run(empty::<(),()>()).unwrap();
+    core.run(empty::<(), ()>()).unwrap();
 }
