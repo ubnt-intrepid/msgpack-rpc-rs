@@ -1,4 +1,0 @@
-[0,0,"0:function:delay",[2,"0"]]
-[0,1,"0:function:delay",[1,"1"]]
-[0,2,"0:function:hello",[]]
-
