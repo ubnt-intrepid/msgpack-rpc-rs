@@ -1,12 +1,11 @@
 use std::io;
-use futures::{Future, Stream};
+use futures::{Future, Stream, Sink};
 use futures::sync::mpsc::{Sender, Receiver};
 use tokio_core::reactor::Handle;
 use tokio_proto::BindServer;
 use super::message::{Request, Response, Notification};
-use super::transport::BidirectionalProto;
-use super::transport::ServerTransport;
-
+use super::transport::{Proto, Tie};
+use super::util;
 
 /// An asynchronous function which takes an `Item` and no return.
 pub trait NotifyService {
@@ -23,13 +22,13 @@ pub trait NotifyService {
 
 pub use tokio_service::Service;
 
-
 /// An endpoint of Msgpack-RPC
 pub struct Endpoint {
     rx_req: Receiver<(u64, Request)>,
     tx_res: Sender<(u64, Response)>,
     rx_not: Receiver<Notification>,
 }
+
 
 impl Endpoint {
     pub(super) fn new(
@@ -56,14 +55,11 @@ impl Endpoint {
             rx_not,
         } = self;
 
-        BidirectionalProto.bind_server(
-            &handle,
-            ServerTransport {
-                stream: rx_req,
-                sink: tx_res,
-            },
-            service,
+        let transport = Tie(
+            rx_req.map_err(|()| util::into_io_error("rx_req")),
+            tx_res.sink_map_err(|_| util::into_io_error("tx_res")),
         );
+        Proto.bind_server(&handle, transport, service);
 
         handle.spawn(rx_not.for_each(
             move |not| n_service.call(not).map_err(|_| ()),

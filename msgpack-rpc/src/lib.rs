@@ -97,12 +97,11 @@ where
     handle.spawn(
         tx_mux
             .sink_map_err(|_| ())
-            .send_all(rx_req.select(rx_res).select(rx_not).map_err(|_| ()))
-            .map(|_| ())
-            .map_err(|_| ()),
+            .send_all(rx_req.select(rx_res).select(rx_not))
+            .map(|_| ()),
     );
 
-    handle.spawn(sink.send_all(rx_mux).map(|_| ()).map_err(|_| ()));
+    handle.spawn(sink.send_all(rx_mux).map(|_| ()));
 
     MuxInput(tx_req, tx_res, tx_not)
 }
