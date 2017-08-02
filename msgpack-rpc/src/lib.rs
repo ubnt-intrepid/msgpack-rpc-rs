@@ -14,6 +14,7 @@ extern crate rmpv;
 mod client;
 mod endpoint;
 mod message;
+mod multiplexer;
 mod transport;
 mod util;
 
@@ -23,7 +24,6 @@ pub use self::message::{Message, Request, Response, Notification};
 pub use self::endpoint::{Endpoint, Service, NotifyService};
 
 use futures::{Future, Stream, Sink};
-use futures::sync::mpsc::{self, Sender, Receiver};
 use tokio_core::reactor::Handle;
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_io::codec::{FramedRead, FramedWrite};
@@ -49,59 +49,14 @@ where
     let stream = FramedRead::new(read, Codec).map_err(|_| ());
     let sink = FramedWrite::new(write, Codec).sink_map_err(|_| ());
 
-    let DemuxOutput(rx_req, rx_res, rx_not) = demux(stream, &handle);
-    let MuxInput(tx_req, tx_res, tx_not) = mux(sink, &handle);
+    let ((rx_req, rx_res, rx_not), t_demux) = multiplexer::demux(stream);
+    let (mux_in, mux_out) = multiplexer::mux();
 
-    let client = Client::new(handle, rx_res, tx_req, tx_not);
-    let endpoint = Endpoint::new(rx_req, tx_res, rx_not);
+    handle.spawn(t_demux);
+    handle.spawn(sink.send_all(mux_out).map(|_| ()));
+
+    let client = Client::new(handle, rx_res, mux_in.0, mux_in.2);
+    let endpoint = Endpoint::new(rx_req, mux_in.1, rx_not);
 
     (client, endpoint)
-}
-
-
-struct DemuxOutput(Receiver<(u64, Request)>, Receiver<(u64, Response)>, Receiver<Notification>);
-
-fn demux<S>(stream: S, handle: &Handle) -> DemuxOutput
-where
-    S: Stream<Item = Message, Error = ()> + 'static,
-{
-    let (tx_req, rx_req) = mpsc::channel(1);
-    let (tx_res, rx_res) = mpsc::channel(1);
-    let (tx_not, rx_not) = mpsc::channel(1);
-
-    handle.spawn(stream.for_each(move |msg| match msg {
-        Message::Request(id, req) => util::do_send_cloned(&tx_req, (id, req)),
-        Message::Response(id, res) => util::do_send_cloned(&tx_res, (id, res)),
-        Message::Notification(not) => util::do_send_cloned(&tx_not, not),
-    }));
-
-    DemuxOutput(rx_req, rx_res, rx_not)
-}
-
-
-struct MuxInput(Sender<(u64, Request)>, Sender<(u64, Response)>, Sender<Notification>);
-
-fn mux<S>(sink: S, handle: &Handle) -> MuxInput
-where
-    S: Sink<SinkItem = Message, SinkError = ()> + 'static,
-{
-    let (tx_req, rx_req) = mpsc::channel(1);
-    let (tx_res, rx_res) = mpsc::channel(1);
-    let (tx_not, rx_not) = mpsc::channel(1);
-    let (tx_mux, rx_mux) = mpsc::channel(1);
-
-    let rx_req = rx_req.map(|(id, req)| Message::Request(id, req));
-    let rx_res = rx_res.map(|(id, res)| Message::Response(id, res));
-    let rx_not = rx_not.map(|not| Message::Notification(not));
-
-    handle.spawn(
-        tx_mux
-            .sink_map_err(|_| ())
-            .send_all(rx_req.select(rx_res).select(rx_not))
-            .map(|_| ()),
-    );
-
-    handle.spawn(sink.send_all(rx_mux).map(|_| ()));
-
-    MuxInput(tx_req, tx_res, tx_not)
 }
