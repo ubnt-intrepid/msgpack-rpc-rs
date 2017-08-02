@@ -74,8 +74,8 @@ pub struct Client {
 
 impl Client {
     /// Send a request message to the server, and return a future of its response.
-    pub fn request(&self, req: Request) -> Box<Future<Item = Response, Error = io::Error>> {
-        Box::new(self.inner.call(req))
+    pub fn request(&self, req: Request) -> <ClientService<Transport, Proto> as Service>::Future {
+        self.inner.call(req)
     }
 
     /// Send a notification message to the server.
