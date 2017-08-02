@@ -24,25 +24,13 @@ pub use tokio_service::Service;
 
 /// An endpoint of Msgpack-RPC
 pub struct Endpoint {
-    rx_req: Receiver<(u64, Request)>,
-    tx_res: Sender<(u64, Response)>,
-    rx_not: Receiver<Notification>,
+    pub(crate) rx_req: Receiver<(u64, Request)>,
+    pub(crate) tx_res: Sender<(u64, Response)>,
+    pub(crate) rx_not: Receiver<Notification>,
 }
 
 
 impl Endpoint {
-    pub(super) fn new(
-        rx_req: Receiver<(u64, Request)>,
-        tx_res: Sender<(u64, Response)>,
-        rx_not: Receiver<Notification>,
-    ) -> Self {
-        Endpoint {
-            rx_req,
-            tx_res,
-            rx_not,
-        }
-    }
-
     /// Start to serve with given services
     pub fn serve<S, N>(self, handle: &Handle, service: S, n_service: N)
     where

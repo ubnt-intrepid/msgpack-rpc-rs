@@ -19,7 +19,7 @@ mod transport;
 mod util;
 
 pub use rmpv::Value;
-pub use self::client::Client;
+pub use self::client::{Client, NewClient, NotifyClient};
 pub use self::message::{Message, Request, Response, Notification};
 pub use self::endpoint::{Endpoint, Service, NotifyService};
 
@@ -31,7 +31,7 @@ use self::message::Codec;
 
 
 /// Create a RPC client and an endpoint, associated with given I/O.
-pub fn make_providers<T>(io: T, handle: &Handle) -> (Client, Endpoint)
+pub fn make_providers<T>(io: T, handle: &Handle) -> (NewClient, Endpoint)
 where
     T: AsyncRead + AsyncWrite + 'static,
 {
@@ -41,7 +41,7 @@ where
 
 
 /// Create a RPC client and service creators, with given I/O pair.
-pub fn make_providers_from_pair<R, W>(read: R, write: W, handle: &Handle) -> (Client, Endpoint)
+pub fn make_providers_from_pair<R, W>(read: R, write: W, handle: &Handle) -> (NewClient, Endpoint)
 where
     R: AsyncRead + 'static,
     W: AsyncWrite + 'static,
@@ -55,8 +55,16 @@ where
     handle.spawn(task_demux);
     handle.spawn(sink.send_all(mux_out).map(|_| ()));
 
-    let client = Client::new(handle, demux_out.1, mux_in.0, mux_in.2);
-    let endpoint = Endpoint::new(demux_out.0, mux_in.1, demux_out.2);
+    let client = NewClient {
+        tx_req: mux_in.0,
+        rx_res: demux_out.1,
+        tx_not: mux_in.2,
+    };
+    let endpoint = Endpoint {
+        rx_req: demux_out.0,
+        tx_res: mux_in.1,
+        rx_not: demux_out.2,
+    };
 
     (client, endpoint)
 }
