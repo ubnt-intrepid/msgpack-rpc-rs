@@ -1,23 +1,64 @@
+use std::marker::PhantomData;
 use futures::{Future, Stream, Sink, Poll};
 use futures::stream::{Select, Map};
 use futures::sync::mpsc::{self, Sender, Receiver};
-use super::message::Message;
 
 
 pub trait ToDemuxId {
     fn to_demux_id(&self) -> u64;
 }
 
-impl ToDemuxId for Message {
-    fn to_demux_id(&self) -> u64 {
-        match *self {
-            Message::Request(_, _) => 0,
-            Message::Response(_, _) => 1,
-            Message::Notification(_) => 2,
-        }
-    }
+
+pub struct Demux3<S, T0, T1, T2>
+where
+    S: Stream<Error = ()>,
+    S::Item: Into<T0> + Into<T1> + Into<T2> + ToDemuxId + 'static,
+    T0: 'static,
+    T1: 'static,
+    T2: 'static,
+{
+    tx0: Sender<T0>,
+    tx1: Sender<T1>,
+    tx2: Sender<T2>,
+    _marker: PhantomData<S>,
 }
 
+impl<S, T0, T1, T2> Demux3<S, T0, T1, T2>
+where
+    S: Stream<Error=()>,
+    S::Item: Into<T0> + Into<T1> + Into<T2> + ToDemuxId + 'static,
+    T0: 'static,
+    T1: 'static,
+    T2: 'static,
+{
+    pub fn new(tx0: Sender<T0>, tx1: Sender<T1>, tx2: Sender<T2>) -> Self {
+        Demux3 {
+            tx0,
+            tx1,
+            tx2,
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn send(&self, msg: S::Item) -> Box<Future<Item = (), Error = ()>> {
+        match msg.to_demux_id() {
+            0 => Self::do_send(&self.tx0, msg.into()),
+            1 => Self::do_send(&self.tx1, msg.into()),
+            2 => Self::do_send(&self.tx2, msg.into()),
+            _ => unreachable!(),
+        }
+    }
+
+    fn do_send<U>(sink: &U, item: U::SinkItem) -> Box<Future<Item = (), Error = ()>>
+    where
+        U: Sink + Clone + 'static,
+    {
+        Box::new(sink.clone().send(item).then(|res| match res {
+            Ok(_) => Ok(()),
+            Err(_) => Err(()),
+        }))
+    }
+}
 
 pub fn demux3<S, T0, T1, T2>(
     stream: S,
@@ -33,26 +74,13 @@ where
     let (tx0, rx0) = mpsc::channel(1);
     let (tx1, rx1) = mpsc::channel(1);
     let (tx2, rx2) = mpsc::channel(1);
+    let demux = Demux3::<S, T0, T1, T2>::new(tx0, tx1, tx2);
 
-    let task = stream.for_each(move |msg| match msg.to_demux_id() {
-        0 => do_send(&tx0, msg.into()),
-        1 => do_send(&tx1, msg.into()),
-        2 => do_send(&tx2, msg.into()),
-        _ => unreachable!(),
-    });
+    let task = stream.for_each(move |msg| demux.send(msg));
 
     ((rx0, rx1, rx2), Box::new(task))
 }
 
-fn do_send<S>(sink: &S, item: S::SinkItem) -> Box<Future<Item = (), Error = ()>>
-where
-    S: Sink + Clone + 'static,
-{
-    Box::new(sink.clone().send(item).then(|res| match res {
-        Ok(_) => Ok(()),
-        Err(_) => Err(()),
-    }))
-}
 
 
 /// A multiplexed stream from 3 inputs.
@@ -86,8 +114,6 @@ impl<T, T0, T1, T2> Stream for Mux3Stream<T, T0, T1, T2> {
         self.inner.poll()
     }
 }
-
-
 
 /// Create a pair of input channels and mulitiplexed stream associated with the inputs.
 pub fn mux3<T, T0, T1, T2>() -> ((Sender<T0>, Sender<T1>, Sender<T2>), Mux3Stream<T, T0, T1, T2>)

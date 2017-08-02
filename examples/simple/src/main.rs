@@ -1,10 +1,9 @@
-extern crate neovim;
 extern crate msgpack_rpc;
 extern crate futures;
 extern crate tokio_core;
 
-use neovim::io::StdioStream;
 use msgpack_rpc::make_providers;
+use msgpack_rpc::io::StdioStream;
 use futures::future::empty;
 use tokio_core::reactor::Core;
 

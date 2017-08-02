@@ -4,7 +4,6 @@ version = "0.1.0"
 authors = ["Yusuke Sasaki <yusuke.sasaki.nuem@gmail.com>"]
 
 [dependencies]
-neovim = { path = "../../lib/" }
 msgpack-rpc = { path = "../../msgpack-rpc" }
 
 futures = "*"

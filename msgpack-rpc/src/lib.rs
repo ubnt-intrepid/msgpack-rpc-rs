@@ -8,6 +8,7 @@ extern crate tokio_core;
 extern crate tokio_io;
 extern crate tokio_proto;
 extern crate tokio_service;
+extern crate tokio_process;
 extern crate rmp;
 extern crate rmpv;
 
@@ -17,6 +18,8 @@ mod message;
 mod multiplexer;
 mod transport;
 mod util;
+
+pub mod io;
 
 pub use rmpv::Value;
 pub use self::client::{Client, NewClient, NotifyClient};

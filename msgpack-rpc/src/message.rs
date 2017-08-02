@@ -2,6 +2,7 @@ use std::io::{self, Read, Write};
 use bytes::{BufMut, BytesMut};
 use tokio_io::codec::{Encoder, Decoder};
 use rmpv::{self, Value};
+use super::multiplexer::ToDemuxId;
 
 const REQUEST_TYPE: i64 = 0;
 const RESPONSE_TYPE: i64 = 1;
@@ -84,6 +85,15 @@ impl From<Notification> for Message {
     }
 }
 
+impl ToDemuxId for Message {
+    fn to_demux_id(&self) -> u64 {
+        match *self {
+            Message::Request(_, _) => 0,
+            Message::Response(_, _) => 1,
+            Message::Notification(_) => 2,
+        }
+    }
+}
 
 
 /// A request message
