@@ -7,13 +7,13 @@ use tokio_proto::multiplex::ClientService;
 use tokio_service::Service;
 
 use super::transport::{ClientTransport, BidirectionalProto};
-use super::message::{Message, Request, Response, Notification};
+use super::message::{Request, Response, Notification};
 
 
 #[derive(Clone)]
 pub struct Client {
     inner: ClientService<ClientTransport, BidirectionalProto>,
-    tx_select: Sender<Message>,
+    tx_not: Sender<Notification>,
     handle: Handle,
 }
 
@@ -21,18 +21,19 @@ impl Client {
     pub(super) fn new(
         handle: &Handle,
         rx_res: Receiver<(u64, Response)>,
-        tx_select: Sender<Message>,
+        tx_req: Sender<(u64, Request)>,
+        tx_not: Sender<Notification>,
     ) -> Self {
         let inner = BidirectionalProto.bind_client(
             handle,
             ClientTransport {
-                rx_res,
-                tx_select: tx_select.clone(),
+                stream: rx_res,
+                sink: tx_req,
             },
         );
         Client {
             inner,
-            tx_select,
+            tx_not,
             handle: handle.clone(),
         }
     }
@@ -45,9 +46,9 @@ impl Client {
     /// Send a notification message to the server.
     pub fn notify(&mut self, not: Notification) {
         self.handle.spawn(
-            self.tx_select
+            self.tx_not
                 .clone()
-                .send(Message::Notification(not))
+                .send(not)
                 .map(|_| ())
                 .map_err(|_| ()),
         );

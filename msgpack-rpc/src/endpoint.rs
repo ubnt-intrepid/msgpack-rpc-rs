@@ -3,7 +3,7 @@ use futures::{Future, Stream};
 use futures::sync::mpsc::{Sender, Receiver};
 use tokio_core::reactor::Handle;
 use tokio_proto::BindServer;
-use super::message::{Message, Request, Response, Notification};
+use super::message::{Request, Response, Notification};
 use super::transport::BidirectionalProto;
 use super::transport::ServerTransport;
 
@@ -27,19 +27,19 @@ pub use tokio_service::Service;
 /// An endpoint of Msgpack-RPC
 pub struct Endpoint {
     rx_req: Receiver<(u64, Request)>,
-    tx_select: Sender<Message>,
+    tx_res: Sender<(u64, Response)>,
     rx_not: Receiver<Notification>,
 }
 
 impl Endpoint {
     pub(super) fn new(
         rx_req: Receiver<(u64, Request)>,
-        tx_select: Sender<Message>,
+        tx_res: Sender<(u64, Response)>,
         rx_not: Receiver<Notification>,
     ) -> Self {
         Endpoint {
             rx_req,
-            tx_select,
+            tx_res,
             rx_not,
         }
     }
@@ -52,11 +52,18 @@ impl Endpoint {
     {
         let Endpoint {
             rx_req,
-            tx_select,
+            tx_res,
             rx_not,
         } = self;
 
-        BidirectionalProto.bind_server(&handle, ServerTransport { rx_req, tx_select }, service);
+        BidirectionalProto.bind_server(
+            &handle,
+            ServerTransport {
+                stream: rx_req,
+                sink: tx_res,
+            },
+            service,
+        );
 
         handle.spawn(rx_not.for_each(
             move |not| n_service.call(not).map_err(|_| ()),
