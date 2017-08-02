@@ -1,25 +1,47 @@
 use futures::{Future, Stream, Sink};
 use futures::sync::mpsc::{self, Sender, Receiver};
-use super::message::{Message, Request, Response, Notification};
+use super::message::Message;
+
+
+pub trait ToDemuxId {
+    fn to_demux_id(&self) -> u64;
+}
+
+impl ToDemuxId for Message {
+    fn to_demux_id(&self) -> u64 {
+        match *self {
+            Message::Request(_, _) => 0,
+            Message::Response(_, _) => 1,
+            Message::Notification(_) => 2,
+        }
+    }
+}
 
 
 #[cfg_attr(rustfmt, rustfmt_skip)]
-pub fn demux<S>(stream: S) -> (
-    (Receiver<(u64, Request)>, Receiver<(u64, Response)>, Receiver<Notification>),
+pub fn demux3<S, T0, T1, T2>(stream: S) -> (
+    (Receiver<T0>, Receiver<T1>, Receiver<T2>),
     Box<Future<Item = (), Error = ()>>,
 )
 where
-    S: Stream<Item = Message, Error = ()> + 'static,
+    S: Stream< Error = ()> + 'static,
+    S::Item: ToDemuxId + Into<T0> + Into<T1> + Into<T2>+ 'static,
+    T0: 'static,
+    T1: 'static,
+    T2: 'static,
 {
     // TODO: choose appropriate buffer length.
     let (tx0, rx0) = mpsc::channel(1);
     let (tx1, rx1) = mpsc::channel(1);
     let (tx2, rx2) = mpsc::channel(1);
 
-    let task = stream.for_each(move |msg| match msg {
-        Message::Request(id, req) => do_send(&tx0, (id, req)),
-        Message::Response(id, res) => do_send(&tx1, (id, res)),
-        Message::Notification(not) => do_send(&tx2, not),
+    let task = stream.for_each(move |msg| {
+        match msg.to_demux_id() {
+            0 => do_send(&tx0, msg.into()),
+            1 => do_send(&tx1, msg.into()),
+            2 => do_send(&tx2, msg.into()),
+            _ => unreachable!(),
+        }
     });
 
     ((rx0, rx1, rx2), Box::new(task))
@@ -40,7 +62,7 @@ where
 ///
 /// The return value is output channels and the future of background task.
 /// You should spawn the task to process
-pub fn mux<T, T0, T1, T2>()
+pub fn mux3<T, T0, T1, T2>()
     -> ((Sender<T0>, Sender<T1>, Sender<T2>), Box<Stream<Item = T, Error = ()>>)
 where
     T: 'static,

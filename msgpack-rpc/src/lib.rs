@@ -49,14 +49,14 @@ where
     let stream = FramedRead::new(read, Codec).map_err(|_| ());
     let sink = FramedWrite::new(write, Codec).sink_map_err(|_| ());
 
-    let ((rx_req, rx_res, rx_not), t_demux) = multiplexer::demux(stream);
-    let (mux_in, mux_out) = multiplexer::mux();
+    let (demux_out, task_demux) = multiplexer::demux3(stream);
+    let (mux_in, mux_out) = multiplexer::mux3();
 
-    handle.spawn(t_demux);
+    handle.spawn(task_demux);
     handle.spawn(sink.send_all(mux_out).map(|_| ()));
 
-    let client = Client::new(handle, rx_res, mux_in.0, mux_in.2);
-    let endpoint = Endpoint::new(rx_req, mux_in.1, rx_not);
+    let client = Client::new(handle, demux_out.1, mux_in.0, mux_in.2);
+    let endpoint = Endpoint::new(demux_out.0, mux_in.1, demux_out.2);
 
     (client, endpoint)
 }
