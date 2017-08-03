@@ -100,24 +100,26 @@ pub struct Request {
     /// The method name
     pub method: String,
     /// Arguments of the method
-    pub params: Vec<Value>,
+    pub params: Value,
 }
 
 impl Request {
     /// Create an instance of request
-    pub fn new<S: Into<String>>(method: S, params: Vec<Value>) -> Self {
-        let method = method.into();
-        Request { method, params }
+    pub fn new<S: Into<String>, P: Into<Value>>(method: S, params: P) -> Self {
+        Request {
+            method: method.into(),
+            params: params.into(),
+        }
     }
 
-    pub fn from_array(array: &[Value]) -> Result<Message, DecodeError> {
-        match (array[0].as_i64(), array[1].as_str(), array[2].as_array()) {
-            (Some(id), Some(method), Some(params)) => {
+    fn from_array(array: &[Value]) -> Result<Message, DecodeError> {
+        match (array[0].as_i64(), array[1].as_str(), array[2].is_array()) {
+            (Some(id), Some(method), true) => {
                 Ok(Message::Request(
                     id as u64,
                     Request {
                         method: method.to_owned(),
-                        params: params.clone(),
+                        params: array[2].clone(),
                     },
                 ))
             }
@@ -125,12 +127,12 @@ impl Request {
         }
     }
 
-    pub fn to_packet(&self, id: u64) -> Value {
+    fn to_packet(&self, id: u64) -> Value {
         Value::Array(vec![
             REQUEST_TYPE.into(),
             id.into(),
             self.method.as_str().into(),
-            self.params.clone().into(),
+            self.params.clone(),
         ])
     }
 }
@@ -164,7 +166,7 @@ impl Response {
         self.0
     }
 
-    pub fn from_array(array: &[Value]) -> Result<Message, DecodeError> {
+    fn from_array(array: &[Value]) -> Result<Message, DecodeError> {
         match (array[0].as_i64(), &array[1], &array[2]) {
             (Some(id), val, &Value::Nil) => Ok(
                 Message::Response(id as u64, Response(Ok(val.clone()))),
@@ -177,7 +179,7 @@ impl Response {
         }
     }
 
-    pub fn to_packet(&self, id: u64) -> Value {
+    fn to_packet(&self, id: u64) -> Value {
         Value::Array(vec![
             RESPONSE_TYPE.into(),
             id.into(),
@@ -194,27 +196,26 @@ pub struct Notification {
     /// The method name
     pub method: String,
     /// Arguments of the method
-    pub params: Vec<Value>,
+    pub params:Value,
 }
 
 impl Notification {
     /// Create an instance of request
-    pub fn new<S: Into<String>>(method: S, params: Vec<Value>) -> Self {
-        let method = method.into();
-        Notification { method, params }
+    pub fn new<S: Into<String>, P:Into<Value>>(method: S, params: P) -> Self {
+        Notification { method: method.into(), params: params.into() }
     }
 
-    pub fn from_array(array: &[Value]) -> Result<Message, DecodeError> {
-        match (array[0].as_str(), array[1].as_array()) {
-            (Some(method), Some(params)) => Ok(Message::Notification(Notification {
+    fn from_array(array: &[Value]) -> Result<Message, DecodeError> {
+        match (array[0].as_str(), array[1].is_array()) {
+            (Some(method), true) => Ok(Message::Notification(Notification {
                 method: method.to_owned(),
-                params: params.clone(),
+                params: array[1].clone(),
             })),
             _ => Err(DecodeError::Invalid),
         }
     }
 
-    pub fn to_packet(&self) -> Value {
+    fn to_packet(&self) -> Value {
         Value::Array(vec![
             NOTIFICATION_TYPE.into(),
             self.method.as_str().into(),

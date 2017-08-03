@@ -1,6 +1,10 @@
 extern crate msgpack_rpc;
 extern crate futures;
 extern crate tokio_core;
+extern crate rmpv;
+#[macro_use]
+extern crate serde_derive;
+extern crate serde;
 
 use msgpack_rpc::make_providers;
 use msgpack_rpc::io::StdioStream;

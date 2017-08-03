@@ -6,6 +6,31 @@ use std::thread;
 use futures::Future;
 use futures::sync::oneshot;
 use futures::future::{ok, FutureResult};
+use rmpv::ext::from_value;
+
+
+fn the_answer() -> Result<u64, String> {
+    Ok(42)
+}
+
+
+#[derive(Deserialize)]
+struct DelayParam {
+    time: u64,
+    message: String,
+}
+
+fn delay(params: DelayParam) -> Box<Future<Item = Response, Error = io::Error>> {
+    let DelayParam { time, message } = params;
+    let (tx, rx) = oneshot::channel();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_secs(time));
+        tx.send(()).unwrap();
+    });
+    rx.and_then(move |_| ok(Response::from_ok(message)))
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+        .boxed()
+}
 
 
 pub struct Handler;
@@ -17,38 +42,19 @@ impl Service for Handler {
     type Future = Box<Future<Item = Self::Response, Error = Self::Error>>;
 
     fn call(&self, req: Request) -> Self::Future {
-        eprintln!("[debug] {:?}", req);
         match req.method.as_str() {
-            "0:function:the_answer" => Box::new(ok(Response::from_ok(42))),
+            "0:function:the_answer" => ok(the_answer().into()).boxed(),
             "0:function:delay" => {
-                if req.params.len() < 2 {
-                    return Box::new(ok(Response::from_err("less params")));
+                match from_value(req.params) {
+                    Ok(params) => delay(params),
+                    Err(e) => ok(Response::from_err(e.to_string())).boxed(),
                 }
-                let time = match req.params[0].as_i64() {
-                    Some(time) => time,
-                    None => {
-                        return Box::new(ok(Response::from_err("params[0] should be an integer")))
-                    }
-                };
-                let message = match req.params[1].as_str() {
-                    Some(message) => message.to_owned(),
-                    None => return Box::new(ok(Response::from_err("params[1] should be a string"))),
-                };
-
-                let (tx, rx) = oneshot::channel();
-                thread::spawn(move || {
-                    thread::sleep(Duration::from_secs(time as u64));
-                    tx.send(()).unwrap();
-                });
-                Box::new(rx.and_then(|_| ok(Response::from_ok(message))).map_err(
-                    |e| {
-                        io::Error::new(io::ErrorKind::Other, e)
-                    },
-                ))
             }
-            m => Box::new(ok(Response::from_err(
-                format!("The method is not found: {:?}", m),
-            ))),
+            m => {
+                ok(Response::from_err(
+                    format!("The method is not found: {:?}", m),
+                )).boxed()
+            }
         }
     }
 }
