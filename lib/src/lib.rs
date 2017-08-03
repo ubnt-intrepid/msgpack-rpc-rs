@@ -94,6 +94,7 @@
 //! ```
 
 extern crate bytes;
+#[macro_use]
 extern crate futures;
 extern crate tokio_core;
 extern crate tokio_io;
@@ -113,7 +114,7 @@ pub mod io;
 pub mod proto;
 
 pub use rmpv::Value;
-pub use self::client::{Client, NewClient, NotifyClient};
+pub use self::client::{Client, NewClient};
 pub use self::message::{Message, Request, Response, Notification};
 pub use self::endpoint::{Endpoint, Service, NotifyService};
 

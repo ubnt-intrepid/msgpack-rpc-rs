@@ -9,11 +9,11 @@ use tokio_proto::multiplex::ClientService;
 use tokio_service::Service;
 
 use super::message::{Request, Response, Notification};
-use super::proto::Proto;
-use super::util::{io_error, Tie};
+use super::proto::{self, Proto};
+use super::util::io_error;
 
 
-type Transport = Tie<
+type Transport = proto::Transport<
     MapErr<Receiver<(u64, Response)>, fn(()) -> io::Error>,
     SinkMapErr<
         Sender<(u64, Request)>,
@@ -35,7 +35,7 @@ impl NewClient {
             tx_req,
             tx_not,
         } = self;
-        let transport = Tie(
+        let transport = Transport::new(
             rx_res.map_err((|()| io_error("rx_res")) as fn(()) -> io::Error),
             tx_req.sink_map_err((|_| io_error("tx_req")) as fn(SendError<(u64, Request)>) -> io::Error),
         );

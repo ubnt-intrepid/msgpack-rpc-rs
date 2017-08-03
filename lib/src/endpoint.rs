@@ -4,8 +4,8 @@ use futures::sync::mpsc::{Sender, Receiver};
 use tokio_core::reactor::Handle;
 use tokio_proto::BindServer;
 use super::message::{Request, Response, Notification};
-use super::proto::Proto;
-use super::util::{io_error, Tie};
+use super::proto::{Proto, Transport};
+use super::util::io_error;
 
 /// An asynchronous function which takes an `Item` and no return.
 pub trait NotifyService {
@@ -43,7 +43,7 @@ impl Endpoint {
             rx_not,
         } = self;
 
-        let transport = Tie(
+        let transport = Transport::new(
             rx_req.map_err(|()| io_error("rx_req")),
             tx_res.sink_map_err(|_| io_error("tx_res")),
         );
