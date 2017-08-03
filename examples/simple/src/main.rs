@@ -6,7 +6,7 @@ extern crate rmpv;
 extern crate serde_derive;
 extern crate serde;
 
-use msgpack_rpc::make_providers;
+use msgpack_rpc::from_io;
 use msgpack_rpc::io::StdioStream;
 use futures::future::empty;
 use tokio_core::reactor::Core;
@@ -19,7 +19,7 @@ fn main() {
     let handle = core.handle();
 
     // create a pair of client/endpoint from an asynchronous I/O.
-    let (_client, endpoint) = make_providers(StdioStream::new(4, 4), &handle);
+    let (_client, endpoint) = from_io(&handle, StdioStream::new(4, 4));
 
     // launch the RPC encpoint with given service handlers.
     endpoint.serve(&handle, RootHandler);

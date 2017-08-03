@@ -14,13 +14,15 @@ use super::util::io_error;
 #[allow(unused_variables)]
 pub trait Handler: 'static {
     ///
-    fn handle_request(&self, method: &str, params: Value) -> BoxFuture<Response, ()>;
+    fn handle_request(&self, method: &str, params: Value) -> HandleResult;
 
     ///
-    fn handle_notification(&self, method: &str, params: Value) -> BoxFuture<(), ()> {
+    fn handle_notification(&self, method: &str, params: Value) -> HandleResult<()> {
         ::futures::future::ok(()).boxed()
     }
 }
+
+pub type HandleResult<T = Result<Value, Value>> = BoxFuture<T, ()>;
 
 
 #[derive(Clone)]
@@ -34,6 +36,7 @@ impl Service for HandleService {
     fn call(&self, req: Request) -> Self::Future {
         self.0
             .handle_request(&req.method, req.params)
+            .map(Response::from)
             .map_err(|_| io_error("HandleService::call"))
             .boxed()
     }

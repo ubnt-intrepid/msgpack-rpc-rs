@@ -7,6 +7,7 @@ use tokio_core::reactor::{Handle, Remote};
 use tokio_proto::BindClient;
 use tokio_proto::multiplex::ClientService;
 use tokio_service::Service;
+use rmpv::Value;
 
 use super::message::{Request, Response, Notification};
 use super::proto::{self, Proto};
@@ -41,28 +42,13 @@ impl NewClient {
             rx_res.map_err((|()| io_error("rx_res")) as fn(()) -> io::Error),
             tx_req.sink_map_err((|_| io_error("tx_req")) as fn(SendError<(u64, Request)>) -> io::Error),
         );
+
         let inner = Proto.bind_client(handle, transport);
-        let inner_not = NotifyClient {
+        Client {
+            inner,
             tx_not,
             handle: handle.remote().clone(),
-        };
-        Client { inner, inner_not }
-    }
-}
-
-
-#[derive(Clone)]
-struct NotifyClient {
-    tx_not: Sender<Notification>,
-    handle: Remote,
-}
-
-impl NotifyClient {
-    fn call(&mut self, not: Notification) {
-        let tx_not = self.tx_not.clone();
-        self.handle.spawn(|_handle| {
-            tx_not.send(not).map(|_| ()).map_err(|_| ())
-        });
+        }
     }
 }
 
@@ -76,17 +62,22 @@ pub type ClientFuture =
 #[derive(Clone)]
 pub struct Client {
     inner: ClientService<Transport, Proto>,
-    inner_not: NotifyClient,
+    tx_not: Sender<Notification>,
+    handle: Remote,
 }
 
 impl Client {
     /// Send a request message to the server, and return a future of its response.
-    pub fn request(&self, req: Request) -> ClientFuture {
-        self.inner.call(req)
+    pub fn request<S: Into<String>, P: Into<Value>>(&self, method: S, params: P) -> ClientFuture {
+        self.inner.call(Request::new(method, params))
     }
 
     /// Send a notification message to the server.
-    pub fn notify(&mut self, not: Notification) {
-        self.inner_not.call(not)
+    pub fn notify<S: Into<String>, P: Into<Value>>(&self, method: S, params: P) {
+        let tx = self.tx_not.clone();
+        let not = Notification::new(method, params);
+        self.handle.spawn(move |_handle| {
+            tx.send(not).map(|_| ()).map_err(|_| ())
+        });
     }
 }

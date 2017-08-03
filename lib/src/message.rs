@@ -9,8 +9,11 @@ const NOTIFICATION_TYPE: i64 = 2;
 
 #[derive(Debug)]
 pub enum Message {
+    #[doc(hidden)]
     Request(u64, Request),
+    #[doc(hidden)]
     Response(u64, Response),
+    #[doc(hidden)]
     Notification(Notification),
 }
 
@@ -38,6 +41,7 @@ impl Message {
     }
 }
 
+#[doc(hidden)]
 impl Into<(u64, Request)> for Message {
     fn into(self) -> (u64, Request) {
         match self {
@@ -47,6 +51,7 @@ impl Into<(u64, Request)> for Message {
     }
 }
 
+#[doc(hidden)]
 impl Into<(u64, Response)> for Message {
     fn into(self) -> (u64, Response) {
         match self {
@@ -56,6 +61,7 @@ impl Into<(u64, Response)> for Message {
     }
 }
 
+#[doc(hidden)]
 impl Into<Notification> for Message {
     fn into(self) -> Notification {
         match self {
@@ -65,18 +71,21 @@ impl Into<Notification> for Message {
     }
 }
 
+#[doc(hidden)]
 impl From<(u64, Request)> for Message {
     fn from(val: (u64, Request)) -> Message {
         Message::Request(val.0, val.1)
     }
 }
 
+#[doc(hidden)]
 impl From<(u64, Response)> for Message {
     fn from(val: (u64, Response)) -> Message {
         Message::Response(val.0, val.1)
     }
 }
 
+#[doc(hidden)]
 impl From<Notification> for Message {
     fn from(val: Notification) -> Message {
         Message::Notification(val)
