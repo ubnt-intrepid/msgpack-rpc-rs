@@ -1,0 +1,21 @@
+sudo: false
+language: rust
+
+rust:
+  - stable
+  - nightly
+
+matrix:
+  allow_failures:
+    - rust: nightly
+
+before_script:
+  - pip install --user ghp-import
+  - export PATH=$HOME/.local/bin:$PATH
+
+script:
+  - cargo build --all
+  - cargo test --all
+
+after_success:
+  - bash scripts/deploy_doc.sh "${TRAVIS_BRANCH}" "${TRAVIS_RUST_VERSION}" "${GH_TOKEN}" "${TRAVIS_REPO_SLUG}"
