@@ -96,7 +96,7 @@ pub use self::message::Message;
 pub use self::client::{Client, NewClient, ClientFuture};
 pub use self::endpoint::{NewEndpoint, Handler, HandleResult};
 
-use futures::{Future, Stream, Sink};
+use futures::{Stream, Sink};
 use tokio_core::reactor::Handle;
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_io::codec::{FramedRead, FramedWrite};
@@ -122,11 +122,8 @@ where
     T: Stream<Item = Message> + 'static,
     U: Sink<SinkItem = Message> + 'static,
 {
-    let (demux_out, task_demux) = multiplexer::demux3(stream.map_err(|_| ()));
-    let (mux_in, mux_out) = multiplexer::mux3();
-
-    handle.spawn(task_demux);
-    handle.spawn(sink.sink_map_err(|_| ()).send_all(mux_out).map(|_| ()));
+    let demux_out = multiplexer::demux3(handle, stream.map_err(|_| ()));
+    let mux_in = multiplexer::mux3(handle, sink.sink_map_err(|_| ()));
 
     let client = NewClient {
         tx_req: mux_in.0,
