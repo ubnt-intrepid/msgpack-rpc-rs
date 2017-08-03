@@ -51,8 +51,14 @@ pub struct Proto;
 impl<T> ::tokio_proto::multiplex::ClientProto<T> for Proto
 where
     T: 'static
-        + Stream<Item = (u64, Response), Error = io::Error>
-        + Sink<SinkItem = (u64, Request), SinkError = io::Error>,
+        + Stream<
+        Item = (u64, Response),
+        Error = io::Error,
+    >
+        + Sink<
+        SinkItem = (u64, Request),
+        SinkError = io::Error,
+    >,
 {
     type Request = Request;
     type Response = Response;
@@ -66,8 +72,14 @@ where
 impl<T> ::tokio_proto::multiplex::ServerProto<T> for Proto
 where
     T: 'static
-        + Stream<Item = (u64, Request), Error = io::Error>
-        + Sink<SinkItem = (u64, Response), SinkError = io::Error>,
+        + Stream<
+        Item = (u64, Request),
+        Error = io::Error,
+    >
+        + Sink<
+        SinkItem = (u64, Response),
+        SinkError = io::Error,
+    >,
 {
     type Request = Request;
     type Response = Response;
@@ -77,4 +89,3 @@ where
         Ok(transport)
     }
 }
-

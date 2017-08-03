@@ -1,6 +1,97 @@
 //!
 //! An implementation of Msgpack-RPC, based on tokio-proto and rmp.
 //!
+//! # Example
+//!
+//! ## Client
+//!
+//! ```ignore
+//! use msgpack_rpc::{Request, make_providers};
+//! use futures::Future;
+//! use futures::future::ok;
+//! use tokio_core::net::TcpStream;
+//!
+//! let addr = "127.0.0.1:6666".parse().unwrap();
+//! let client = TcpStream::connect(&addr, &handle)
+//!     .and_then(|stream| {
+//!         let (client, _) = make_providers(stream, &handle);
+//!         client.launch(&handle)
+//!     });
+//!
+//! let task = client.and_then(|client| {
+//!     client.request(Request::new("hello", vec![]))
+//!         .and_then(|response| {
+//!             println!("{:?}", response);
+//!             ok(())
+//!         })
+//!     });
+//!
+//! core.run(task).unwrap();
+//! ```
+//!
+//! ## Server
+//!
+//! ```ignore
+//! use msgpack_rpc::{
+//!     Request, Response, Notification,
+//!     Client, Service, NotifyService,
+//!     make_providers
+//! };
+//! use std::io;
+//! use futures::{Future, BoxFuture};
+//!
+//! struct RootService {
+//!     client: Client,
+//!     /* ... */
+//! }
+//! impl Service for RootService {
+//!     type Request = Request;
+//!     type Response = Response;
+//!     type Error = io::Error;
+//!     type Future = BoxFuture<Self::Response, Self::Error>;
+//!     fn call(&self, req: Self::Request) -> Self::Future {
+//!         match req.method.as_str() {
+//!             "func" => {
+//!                 self.client.request(Request::new("hoge", vec![]))
+//!                     .and_then(|response| {
+//!                         let message = format!("Received: {:?}", response);
+//!                         ok(Response::from_ok(message))
+//!                     })
+//!             }
+//!             // ...
+//!         }
+//!         /* ... */
+//!     }
+//! }
+//!
+//! struct RootNotifyService;
+//! impl NotifyService for RootNotifyService {
+//!     type Item = Notification;
+//!     type Error = io::Error;
+//!     type Future = BoxFuture<(), Self::Error>;
+//!     fn call(&self, not: Self::Item) -> Self::Future {
+//!         /* ... */
+//!     }
+//! }
+//!
+//! let listen_addr = "127.0.0.1:6666".parse().unwrap();
+//! let listener = TcpListener::bind(&addr, &handle).unwrap();
+//!
+//! let server = listener.incoming().for_each(move |(stream, _)| {
+//!     let (_, endpoint) = make_providers(stream, &handle);
+//!
+//!     client.launch(&handle)
+//!         .and_then(move |client| {
+//!             let service = RootService {
+//!                 client,
+//!                 /* ... */
+//!             };
+//!             endpoint.serve(&handle, service, RootNotifyService);
+//!             ok(())
+//!         })
+//! });
+//! core.run(server);
+//! ```
 
 extern crate bytes;
 extern crate futures;
@@ -16,10 +107,10 @@ mod client;
 mod endpoint;
 mod message;
 mod multiplexer;
-mod proto;
 mod util;
 
 pub mod io;
+pub mod proto;
 
 pub use rmpv::Value;
 pub use self::client::{Client, NewClient, NotifyClient};
