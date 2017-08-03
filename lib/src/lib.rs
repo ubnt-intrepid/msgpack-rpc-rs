@@ -102,21 +102,19 @@ extern crate tokio_proto;
 extern crate tokio_service;
 extern crate tokio_process;
 extern crate rmp;
-extern crate rmpv;
+pub extern crate rmpv;
 
 mod client;
 mod endpoint;
 mod message;
 mod multiplexer;
 mod util;
-
 pub mod io;
 pub mod proto;
 
-pub use rmpv::Value;
-pub use self::client::{Client, NewClient};
-pub use self::message::{Message, Request, Response, Notification};
-pub use self::endpoint::{Endpoint, Service, NotifyService};
+pub use self::message::{Request, Response, Notification};
+pub use self::client::{Client, NewClient, ClientFuture};
+pub use self::endpoint::{NewEndpoint, Handler};
 
 use futures::{Future, Stream, Sink};
 use tokio_core::reactor::Handle;
@@ -126,7 +124,7 @@ use self::proto::Codec;
 
 
 /// Create a RPC client and an endpoint, associated with given I/O.
-pub fn make_providers<T>(io: T, handle: &Handle) -> (NewClient, Endpoint)
+pub fn make_providers<T>(io: T, handle: &Handle) -> (NewClient, NewEndpoint)
 where
     T: AsyncRead + AsyncWrite + 'static,
 {
@@ -136,7 +134,11 @@ where
 
 
 /// Create a RPC client and service creators, with given I/O pair.
-pub fn make_providers_from_pair<R, W>(read: R, write: W, handle: &Handle) -> (NewClient, Endpoint)
+pub fn make_providers_from_pair<R, W>(
+    read: R,
+    write: W,
+    handle: &Handle,
+) -> (NewClient, NewEndpoint)
 where
     R: AsyncRead + 'static,
     W: AsyncWrite + 'static,
@@ -155,7 +157,7 @@ where
         rx_res: demux_out.1,
         tx_not: mux_in.2,
     };
-    let endpoint = Endpoint {
+    let endpoint = NewEndpoint {
         rx_req: demux_out.0,
         tx_res: mux_in.1,
         rx_not: demux_out.2,

@@ -12,7 +12,7 @@ use futures::future::empty;
 use tokio_core::reactor::Core;
 
 mod handler;
-use handler::{Handler, Dummy};
+use handler::RootHandler;
 
 fn main() {
     let mut core = Core::new().unwrap();
@@ -22,7 +22,7 @@ fn main() {
     let (_client, endpoint) = make_providers(StdioStream::new(4, 4), &handle);
 
     // launch the RPC encpoint with given service handlers.
-    endpoint.serve(&handle, Handler, Dummy);
+    endpoint.serve(&handle, RootHandler);
 
     // start event loop infinitely.
     core.run(empty::<(), ()>()).unwrap();

@@ -22,6 +22,7 @@ type Transport = proto::Transport<
 >;
 
 
+/// A builder of `Client`, which contains channels to interact with I/O.
 pub struct NewClient {
     pub(crate) rx_res: Receiver<(u64, Response)>,
     pub(crate) tx_req: Sender<(u64, Request)>,
@@ -29,6 +30,7 @@ pub struct NewClient {
 }
 
 impl NewClient {
+    /// Create a new `Client` with background task spawned on an event loop of `handle`.
     pub fn launch(self, handle: &Handle) -> Client {
         let NewClient {
             rx_res,
@@ -50,14 +52,13 @@ impl NewClient {
 
 
 #[derive(Clone)]
-pub struct NotifyClient {
+struct NotifyClient {
     tx_not: Sender<Notification>,
     handle: Remote,
 }
 
 impl NotifyClient {
-    /// Send a notification message to the server.
-    pub fn call(&mut self, not: Notification) {
+    fn call(&mut self, not: Notification) {
         let tx_not = self.tx_not.clone();
         self.handle.spawn(|_handle| {
             tx_not.send(not).map(|_| ()).map_err(|_| ())
@@ -66,6 +67,12 @@ impl NotifyClient {
 }
 
 
+/// The return type of `Client::request()`, represents a future of RPC request.
+pub type ClientFuture =
+    <ClientService<Transport, Proto> as Service>::Future;
+
+
+/// A client of Msgpack-RPC
 #[derive(Clone)]
 pub struct Client {
     inner: ClientService<Transport, Proto>,
@@ -74,7 +81,7 @@ pub struct Client {
 
 impl Client {
     /// Send a request message to the server, and return a future of its response.
-    pub fn request(&self, req: Request) -> <ClientService<Transport, Proto> as Service>::Future {
+    pub fn request(&self, req: Request) -> ClientFuture {
         self.inner.call(req)
     }
 

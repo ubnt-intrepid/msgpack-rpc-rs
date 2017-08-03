@@ -196,13 +196,16 @@ pub struct Notification {
     /// The method name
     pub method: String,
     /// Arguments of the method
-    pub params:Value,
+    pub params: Value,
 }
 
 impl Notification {
     /// Create an instance of request
-    pub fn new<S: Into<String>, P:Into<Value>>(method: S, params: P) -> Self {
-        Notification { method: method.into(), params: params.into() }
+    pub fn new<S: Into<String>, P: Into<Value>>(method: S, params: P) -> Self {
+        Notification {
+            method: method.into(),
+            params: params.into(),
+        }
     }
 
     fn from_array(array: &[Value]) -> Result<Message, DecodeError> {

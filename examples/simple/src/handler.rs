@@ -1,11 +1,11 @@
-use msgpack_rpc::{Request, Response, Notification, Service, NotifyService};
+use msgpack_rpc::{Response, Handler};
 
-use std::io;
 use std::time::Duration;
 use std::thread;
 use futures::Future;
 use futures::sync::oneshot;
-use futures::future::{ok, FutureResult};
+use futures::future::{ok, BoxFuture};
+use rmpv::Value;
 use rmpv::ext::from_value;
 
 
@@ -20,7 +20,7 @@ struct DelayParam {
     message: String,
 }
 
-fn delay(params: DelayParam) -> Box<Future<Item = Response, Error = io::Error>> {
+fn delay(params: DelayParam) -> BoxFuture<Response, ()> {
     let DelayParam { time, message } = params;
     let (tx, rx) = oneshot::channel();
     thread::spawn(move || {
@@ -28,24 +28,19 @@ fn delay(params: DelayParam) -> Box<Future<Item = Response, Error = io::Error>> 
         tx.send(()).unwrap();
     });
     rx.and_then(move |_| ok(Response::from_ok(message)))
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+        .map_err(|_| ())
         .boxed()
 }
 
 
-pub struct Handler;
+pub struct RootHandler;
 
-impl Service for Handler {
-    type Request = Request;
-    type Response = Response;
-    type Error = io::Error;
-    type Future = Box<Future<Item = Self::Response, Error = Self::Error>>;
-
-    fn call(&self, req: Request) -> Self::Future {
-        match req.method.as_str() {
+impl Handler for RootHandler {
+    fn handle_request(&self, method: &str, params: Value) -> BoxFuture<Response, ()> {
+        match method {
             "0:function:the_answer" => ok(the_answer().into()).boxed(),
             "0:function:delay" => {
-                match from_value(req.params) {
+                match from_value(params) {
                     Ok(params) => delay(params),
                     Err(e) => ok(Response::from_err(e.to_string())).boxed(),
                 }
@@ -56,18 +51,5 @@ impl Service for Handler {
                 )).boxed()
             }
         }
-    }
-}
-
-
-pub struct Dummy;
-
-impl NotifyService for Dummy {
-    type Item = Notification;
-    type Error = io::Error;
-    type Future = FutureResult<(), Self::Error>;
-
-    fn call(&self, _not: Notification) -> Self::Future {
-        ok(())
     }
 }
