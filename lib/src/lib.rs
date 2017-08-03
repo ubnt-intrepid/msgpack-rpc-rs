@@ -16,7 +16,7 @@ mod client;
 mod endpoint;
 mod message;
 mod multiplexer;
-mod transport;
+mod proto;
 mod util;
 
 pub mod io;
@@ -30,7 +30,7 @@ use futures::{Future, Stream, Sink};
 use tokio_core::reactor::Handle;
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_io::codec::{FramedRead, FramedWrite};
-use self::message::Codec;
+use self::proto::Codec;
 
 
 /// Create a RPC client and an endpoint, associated with given I/O.

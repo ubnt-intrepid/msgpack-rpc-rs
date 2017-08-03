@@ -8,9 +8,9 @@ use tokio_proto::BindClient;
 use tokio_proto::multiplex::ClientService;
 use tokio_service::Service;
 
-use super::transport::{Proto, Tie};
 use super::message::{Request, Response, Notification};
-use super::util;
+use super::proto::Proto;
+use super::util::{io_error, Tie};
 
 
 type Transport = Tie<
@@ -36,8 +36,8 @@ impl NewClient {
             tx_not,
         } = self;
         let transport = Tie(
-            rx_res.map_err((|()| util::into_io_error("rx_res")) as fn(()) -> io::Error),
-            tx_req.sink_map_err((|_| util::into_io_error("tx_req")) as fn(SendError<(u64, Request)>) -> io::Error),
+            rx_res.map_err((|()| io_error("rx_res")) as fn(()) -> io::Error),
+            tx_req.sink_map_err((|_| io_error("tx_req")) as fn(SendError<(u64, Request)>) -> io::Error),
         );
         let inner = Proto.bind_client(handle, transport);
         let inner_not = NotifyClient {
