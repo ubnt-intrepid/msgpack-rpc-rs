@@ -8,6 +8,7 @@ msgpack-rpc = { path = "../../lib" }
 
 futures = "*"
 tokio-core = "*"
+tokio-timer = "*"
 serde = "*"
 serde_derive = "*"
 rmpv = { version = "*", features = ["with-serde"] }
