@@ -76,12 +76,17 @@ pub use self::endpoint::{Endpoint, Handler, HandleResult};
 
 use futures::{Stream, Sink};
 use tokio_io::{AsyncRead, AsyncWrite};
+use tokio_io::io::{ReadHalf, WriteHalf};
 use tokio_io::codec::{FramedRead, FramedWrite};
 use self::proto::Codec;
 
 
 /// Create a RPC client and an endpoint, associated with given I/O.
-pub fn from_io<T>(io: T) -> (NewClient, Endpoint, Distributor)
+pub fn from_io<T>(
+    io: T,
+) -> (NewClient,
+      Endpoint,
+      Distributor<FramedRead<ReadHalf<T>, Codec>, FramedWrite<WriteHalf<T>, Codec>>)
 where
     T: AsyncRead + AsyncWrite + 'static,
 {
@@ -90,7 +95,7 @@ where
 }
 
 /// Create a RPC client and endpoint, associated with given stream/sink.
-pub fn from_transport<T, U>(stream: T, sink: U) -> (NewClient, Endpoint, Distributor)
+pub fn from_transport<T, U>(stream: T, sink: U) -> (NewClient, Endpoint, Distributor<T, U>)
 where
     T: Stream<Item = Message> + 'static,
     U: Sink<SinkItem = Message> + 'static,
