@@ -2,7 +2,7 @@ use std::io;
 use futures::{Future, Stream, Sink};
 use futures::sink::SinkMapErr;
 use futures::stream::MapErr;
-use futures::sync::mpsc::{Sender, Receiver, SendError};
+use futures::sync::mpsc::{UnboundedSender, UnboundedReceiver, SendError};
 use tokio_core::reactor::{Handle, Remote};
 use tokio_proto::BindClient;
 use tokio_proto::multiplex::ClientService;
@@ -15,9 +15,9 @@ use super::util::io_error;
 
 
 type Transport = proto::Transport<
-    MapErr<Receiver<(u64, Response)>, fn(()) -> io::Error>,
+    MapErr<UnboundedReceiver<(u64, Response)>, fn(()) -> io::Error>,
     SinkMapErr<
-        Sender<(u64, Request)>,
+        UnboundedSender<(u64, Request)>,
         fn(SendError<(u64, Request)>) -> io::Error,
     >,
 >;
@@ -25,9 +25,9 @@ type Transport = proto::Transport<
 
 /// A builder of `Client`, which contains channels to interact with I/O.
 pub struct NewClient {
-    pub(crate) rx_res: Receiver<(u64, Response)>,
-    pub(crate) tx_req: Sender<(u64, Request)>,
-    pub(crate) tx_not: Sender<Notification>,
+    pub(crate) rx_res: UnboundedReceiver<(u64, Response)>,
+    pub(crate) tx_req: UnboundedSender<(u64, Request)>,
+    pub(crate) tx_not: UnboundedSender<Notification>,
 }
 
 impl NewClient {
@@ -62,7 +62,7 @@ pub type ClientFuture =
 #[derive(Clone)]
 pub struct Client {
     inner: ClientService<Transport, Proto>,
-    tx_not: Sender<Notification>,
+    tx_not: UnboundedSender<Notification>,
     handle: Remote,
 }
 

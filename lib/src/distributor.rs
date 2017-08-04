@@ -1,5 +1,5 @@
 use futures::{Future, Stream, Sink};
-use futures::sync::mpsc::{self, Sender, Receiver};
+use futures::sync::mpsc::{self, UnboundedSender, UnboundedReceiver};
 use tokio_core::reactor::Handle;
 use super::message::{Message, Request, Response, Notification};
 
@@ -20,17 +20,20 @@ pub fn distributor<T, U>(
     stream: T,
     sink: U,
 ) -> (Distributor,
-      (Receiver<(u64, Request)>, Receiver<(u64, Response)>, Receiver<Notification>),
-      (Sender<(u64, Request)>, Sender<(u64, Response)>, Sender<Notification>))
+      (UnboundedReceiver<(u64, Request)>,
+       UnboundedReceiver<(u64, Response)>,
+       UnboundedReceiver<Notification>),
+      (UnboundedSender<(u64, Request)>,
+       UnboundedSender<(u64, Response)>,
+       UnboundedSender<Notification>))
 where
     T: Stream<Item = Message> + 'static,
     U: Sink<SinkItem = Message> + 'static,
 {
     let (demux_out, task_demux) = {
-        // TODO: choose appropriate buffer length.
-        let (tx0, rx0) = mpsc::channel(1);
-        let (tx1, rx1) = mpsc::channel(1);
-        let (tx2, rx2) = mpsc::channel(1);
+        let (tx0, rx0) = mpsc::unbounded();
+        let (tx1, rx1) = mpsc::unbounded();
+        let (tx2, rx2) = mpsc::unbounded();
         let task = stream.map_err(|_| ()).for_each(move |msg| match msg {
             Message::Request(_, _) => do_send(&tx0, msg.into()),
             Message::Response(_, _) => do_send(&tx1, msg.into()),
@@ -40,10 +43,9 @@ where
     };
 
     let (mux_in, task_mux) = {
-        // TODO: choose appropriate buffer length.
-        let (tx0, rx0) = mpsc::channel(1);
-        let (tx1, rx1) = mpsc::channel(1);
-        let (tx2, rx2) = mpsc::channel(1);
+        let (tx0, rx0) = mpsc::unbounded();
+        let (tx1, rx1) = mpsc::unbounded();
+        let (tx2, rx2) = mpsc::unbounded();
         let task = sink.sink_map_err(|_| ())
             .send_all(rx0.map(Into::into).select(rx1.map(Into::into)).select(
                 rx2.map(

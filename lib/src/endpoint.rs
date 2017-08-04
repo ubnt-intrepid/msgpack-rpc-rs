@@ -1,7 +1,7 @@
 use std::io;
 use std::sync::Arc;
 use futures::{Future, Stream, Sink, BoxFuture};
-use futures::sync::mpsc::{Sender, Receiver};
+use futures::sync::mpsc::{UnboundedSender, UnboundedReceiver};
 use tokio_core::reactor::Handle;
 use tokio_proto::BindServer;
 use tokio_service::Service;
@@ -45,9 +45,9 @@ impl Service for HandleService {
 
 /// An endpoint of Msgpack-RPC
 pub struct Endpoint {
-    pub(crate) rx_req: Receiver<(u64, Request)>,
-    pub(crate) tx_res: Sender<(u64, Response)>,
-    pub(crate) rx_not: Receiver<Notification>,
+    pub(crate) rx_req: UnboundedReceiver<(u64, Request)>,
+    pub(crate) tx_res: UnboundedSender<(u64, Response)>,
+    pub(crate) rx_not: UnboundedReceiver<Notification>,
 }
 
 
