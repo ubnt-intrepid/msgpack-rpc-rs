@@ -13,15 +13,9 @@ use std::time::Duration;
 use futures::Future;
 use futures::future::{empty, ok, join_all};
 use tokio_core::reactor::Core;
-use tokio_timer::{Timer, Sleep};
+use tokio_timer::Timer;
 use rmpv::Value;
 use rmpv::ext::{from_value, to_value};
-
-
-fn delayed(interval: Duration) -> Sleep {
-    Timer::default().sleep(interval)
-}
-
 
 
 #[derive(Serialize, Deserialize)]
@@ -39,7 +33,8 @@ impl Handler for RootHandler {
             "0:function:delay" => {
                 match from_value(params) {
                     Ok(DelayParam { interval, message }) => {
-                        delayed(Duration::from_secs(interval))
+                        Timer::default()
+                            .sleep(Duration::from_secs(interval))
                             .map_err(|_| ())
                             .map(move |_| Ok(message.into()))
                             .boxed()
@@ -53,13 +48,14 @@ impl Handler for RootHandler {
 }
 
 fn endpoint() {
-    // create a pair of client/endpoint from an asynchronous I/O.
-    let (_, endpoint, distributor) = from_io(StdioStream::new(4, 4));
-
     let mut core = Core::new().unwrap();
     let handle = core.handle();
 
-    // launch the RPC encpoint with given service handlers.
+    // Create an asynchronous I/O of standard input/standard output.
+    let stdio = StdioStream::new(4);
+
+    // Launch a RPC endpoint with given service handlers.
+    let (_, endpoint, distributor) = from_io(stdio);
     distributor.launch(&handle);
     endpoint.launch(&handle, RootHandler);
 
@@ -67,23 +63,22 @@ fn endpoint() {
     core.run(empty::<(), ()>()).unwrap();
 }
 
-fn main() {
-    if let Some("--endpoint") = std::env::args().nth(1).as_ref().map(|s| s.as_str()) {
-        endpoint();
-        return;
-    }
-
+fn client() {
     let mut core = Core::new().unwrap();
     let handle = core.handle();
 
+    // Spawn the process as a RPC endpoint.
     let program = std::env::args().nth(0).unwrap();
-    let child = ChildProcessStream::launch(program, vec!["--endpoint"], &handle).unwrap();
+    let child = ChildProcessStream::launch(&handle, program, vec!["--endpoint"]).unwrap();
 
-    let (client, _, distributor) = from_io(child);
-    distributor.launch(&handle);
+    // Create a RPC client associated with the child process spawned above.
+    let client = {
+        let (client, _, distributor) = from_io(child);
+        distributor.launch(&handle);
+        client.launch(&handle)
+    };
 
-    let client = client.launch(&handle);
-    core.run(join_all((0..10).map(move |i| {
+    let task = join_all((0..10).map(move |i| {
         eprintln!("Request: {}", i);
         let response = if i == 4 {
             client.request(
@@ -96,11 +91,20 @@ fn main() {
         } else {
             client.request("0:function:the_answer", Vec::<Value>::new())
         };
-        response
-            .and_then(|res| {
-                eprintln!("Received: {:?}", res);
-                ok(())
-            })
-            .map_err(|_| ())
-    }))).unwrap();;
+
+        response.and_then(|res| {
+            eprintln!("Response: {:?}", res);
+            ok(())
+        })
+    }));
+
+    core.run(task).unwrap();;
+}
+
+fn main() {
+    if let Some("--endpoint") = std::env::args().nth(1).as_ref().map(|s| s.as_str()) {
+        endpoint();
+    } else {
+        client();
+    }
 }

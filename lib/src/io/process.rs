@@ -13,23 +13,23 @@ pub struct ChildProcessStream {
 }
 
 impl ChildProcessStream {
-    pub fn launch<S, I, A>(program: S, args: I, handle: &Handle) -> io::Result<Self>
+    pub fn launch<S, I, A>(handle: &Handle, program: S, args: I) -> io::Result<Self>
     where
         S: AsRef<OsStr>,
         I: IntoIterator<Item = A>,
         A: AsRef<OsStr>,
     {
         Self::from_builder(
+            handle,
             Command::new(program)
                 .args(args)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped()),
-            handle,
         )
     }
 
-    pub fn from_builder(command: &mut Command, handle: &Handle) -> io::Result<Self> {
+    pub fn from_builder(handle: &Handle, command: &mut Command) -> io::Result<Self> {
         let child = command.spawn_async(handle)?;
         Ok(ChildProcessStream { child })
     }
