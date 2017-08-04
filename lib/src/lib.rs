@@ -1,42 +1,42 @@
 //!
 //! An implementation of Msgpack-RPC, based on tokio-proto and rmp.
 //!
+//! This crate focuses on bi-directional RPC on single I/O.
+//!
 //! # Example
 //!
-//! ## Client
-//!
 //! ```ignore
-//! use msgpack_rpc::from_io;
-//! // ...
+//! // Create a tuple of RPC components from an I/O.
+//! let (client, endpoint, distibutor) = msgpack_rpc::from_io(StdioStream::new(4, 4));
 //!
-//! let addr = "127.0.0.1:6666".parse().unwrap();
-//! let client = TcpStream::connect(&addr, &handle)
-//!     .and_then(|stream| {
-//!         let (client, _, distibutor) = from_io(stream);
-//!         distributor.launch(&handle);
-//!         client.launch(&handle)
+//! // You must launch the distributor on certain event loop.
+//! // It will executes tasks which process encoding/decoding Msgpack-RPC messages.
+//! distributor.launch(&handle);
+//!
+//! // Launch a client on an event loop.
+//! let client = client.launch(&handle);
+//!
+//! // Call a precedure and receive its response asynchronously.
+//! let task = client.request("hello", vec![])
+//!     .and_then(|response| {
+//!         eprintln!("{:?}", response);
+//!         ok(())
 //!     });
 //!
-//! let task = client.and_then(|client| {
-//!     client.request("hello", vec![])
-//!         .and_then(|response| {
-//!             println!("{:?}", response);
-//!             ok(())
-//!         })
-//!     });
+//! // Start the event loop.
 //! core.run(task).unwrap();
 //! ```
 //!
-//! ## Server
+//! You can serve request/notifications from peer, by using `endpoint`:
 //!
 //! ```ignore
-//! use msgpack_rpc::{Handler, HandleResult, from_io};
-//! // ...
+//! use msgpack_rpc::{Handler, HandleResult};
 //!
-//! struct RootService {
+//! struct RootHandler {
 //!     /* ... */
 //! }
-//! impl Handler for RootService {
+//!
+//! impl Handler for RootHandler {
 //!     fn handle_request(&self, method: &str, params: Value) -> HandleResult {
 //!         match method {
 //!             "func" => ok(Ok(42u64).into()).boxed()
@@ -45,16 +45,9 @@
 //!     }
 //! }
 //!
-//! let addr = "127.0.0.1:6666".parse().unwrap();
-//! let listener = TcpListener::bind(&addr, &handle).unwrap();
-//! let server = listener.incoming().for_each(move |(stream, _)| {
-//!     let (_, endpoint, distributor) = from_io(stream);
-//!     distributor.launch(&handle);
-//!
-//!     let service = RootService { /* ... */ };
-//!     endpoint.serve(&handle, service);
-//! });
-//! core.run(server);
+//! // Launch an endpoint service on the event loop of `handle`.
+//! // It will spawn a service to handle requests/notifications from a peer.
+//! endpoint.launch(&handle, RootHandler { /* ... */ });
 //! ```
 
 extern crate bytes;
