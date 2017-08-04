@@ -15,14 +15,16 @@ mod handler;
 use handler::RootHandler;
 
 fn main() {
+    // create a pair of client/endpoint from an asynchronous I/O.
+    let (client, endpoint, distributor) = from_io(StdioStream::new(4, 4));
+
     let mut core = Core::new().unwrap();
     let handle = core.handle();
 
-    // create a pair of client/endpoint from an asynchronous I/O.
-    let (_client, endpoint) = from_io(&handle, StdioStream::new(4, 4));
-
     // launch the RPC encpoint with given service handlers.
-    endpoint.serve(&handle, RootHandler);
+    let _ = client.launch(&handle);
+    distributor.launch(&handle);
+    endpoint.launch(&handle, RootHandler);
 
     // start event loop infinitely.
     core.run(empty::<(), ()>()).unwrap();

@@ -1,5 +1,5 @@
 //!
-//! Definitions of I/O streams
+//! I/O streams
 //!
 
 mod stdio;

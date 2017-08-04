@@ -1,6 +1,5 @@
 use std::io::{self, Read, Write};
 use rmpv::{self, Value};
-use super::multiplexer::ToDemuxId;
 
 const REQUEST_TYPE: i64 = 0;
 const RESPONSE_TYPE: i64 = 1;
@@ -89,16 +88,6 @@ impl From<(u64, Response)> for Message {
 impl From<Notification> for Message {
     fn from(val: Notification) -> Message {
         Message::Notification(val)
-    }
-}
-
-impl ToDemuxId for Message {
-    fn to_demux_id(&self) -> u64 {
-        match *self {
-            Message::Request(_, _) => 0,
-            Message::Response(_, _) => 1,
-            Message::Notification(_) => 2,
-        }
     }
 }
 

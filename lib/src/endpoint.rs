@@ -44,18 +44,18 @@ impl Service for HandleService {
 
 
 /// An endpoint of Msgpack-RPC
-pub struct NewEndpoint {
+pub struct Endpoint {
     pub(crate) rx_req: Receiver<(u64, Request)>,
     pub(crate) tx_res: Sender<(u64, Response)>,
     pub(crate) rx_not: Receiver<Notification>,
 }
 
 
-impl NewEndpoint {
+impl Endpoint {
     /// Spawn tasks to handle services on a event loop of `handle`, with given service handlers.
     ///
-    pub fn serve<H: Handler>(self, handle: &Handle, handler: H) {
-        let NewEndpoint {
+    pub fn launch<H: Handler>(self, handle: &Handle, handler: H) {
+        let Endpoint {
             rx_req,
             tx_res,
             rx_not,

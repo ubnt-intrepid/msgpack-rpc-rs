@@ -1,3 +1,7 @@
+//!
+//! Protocol definitions
+//!
+
 use std::io;
 use bytes::{BufMut, BytesMut};
 use futures::{Stream, Sink, Poll, StartSend, Async, AsyncSink};
