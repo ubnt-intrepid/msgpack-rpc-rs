@@ -12,7 +12,7 @@ use rmpv::Value;
 
 use super::Handler;
 use super::client::{Client, NewClient};
-use super::distributor::{Distributor, Demux, Mux};
+use super::distributor::{Demux, Mux};
 use super::message::{Message, Request, Response, Notification};
 use super::proto::{Codec, Proto, Transport};
 use super::util::io_error;
@@ -44,7 +44,7 @@ impl<H: Handler> HandleService<H> {
 }
 
 
-/// An endpoint of Msgpack-RPC
+/// An endpoint represents a peer of MessagePack-RPC.
 pub struct Endpoint {
     rx_req: UnboundedReceiver<(u64, Request)>,
     tx_res: UnboundedSender<(u64, Response)>,
@@ -54,7 +54,7 @@ pub struct Endpoint {
 
 
 impl Endpoint {
-    /// Create a RPC client and an endpoint, associated with given I/O.
+    /// Create a RPC endpoint from asyncrhonous I/O.
     pub fn from_io<T: AsyncRead + AsyncWrite + 'static>(handle: &Handle, io: T) -> Self {
         let (read, write) = io.split();
         Self::from_transport(
@@ -64,7 +64,7 @@ impl Endpoint {
         )
     }
 
-    /// Create a RPC client and endpoint, associated with given stream/sink.
+    /// Create a RPC endpoint from a pair of stream/sink.
     pub fn from_transport<T, U>(handle: &Handle, stream: T, sink: U) -> Self
     where
         T: Stream<Item = Message> + 'static,
@@ -84,23 +84,21 @@ impl Endpoint {
         };
         let client = client.launch(handle);
 
-        let distributor = Distributor {
-            demux: Demux {
-                stream: Some(stream),
-                buffer: None,
-                tx0: d_tx0,
-                tx1: d_tx1,
-                tx2: d_tx2,
-            },
-            mux: Mux {
-                sink,
-                buffer: Default::default(),
-                rx0: m_rx0,
-                rx1: m_rx1,
-                rx2: m_rx2,
-            },
-        };
-        distributor.launch(handle);
+        handle.spawn(Demux {
+            stream: Some(stream),
+            buffer: None,
+            tx0: d_tx0,
+            tx1: d_tx1,
+            tx2: d_tx2,
+        });
+
+        handle.spawn(Mux {
+            sink,
+            buffer: Default::default(),
+            rx0: m_rx0,
+            rx1: m_rx1,
+            rx2: m_rx2,
+        });
 
         Endpoint {
             rx_req: d_rx0,
@@ -110,16 +108,31 @@ impl Endpoint {
         }
     }
 
+    /// Return the reference of `Client` associated with the endpoint.
     pub fn client(&self) -> &Client {
         &self.client
     }
 
+    /// Return the instance of `Client` associated with the endpoint.
+    ///
+    /// This function is useful if the endpoint doesn't handle any incoming requests/notifications.
+    /// If the endpoint requires to serve requests/notifications, use `Endpoint::serve()` instead.
     pub fn into_client(self) -> Client {
         self.client
     }
 
-    /// Spawn tasks to handle services on a event loop of `handle`, with given service handlers.
-    pub fn launch<H: Handler>(self, handle: &Handle, handler: H) -> Client {
+    /// Start to serve incoming requests.
+    ///
+    /// This function does not block current thread, but returns an instance of `Client` associated
+    /// with the I/O.
+    /// If you want to run the event loop infinitely, use `futures::future::empty()` as follows:
+    ///
+    /// ```ignore
+    /// let mut core = Core::new().unwrap();
+    /// endpoint.serve(&core.handle(), foo);
+    /// let _: Result<(), ()> = core.run(empty());
+    /// ```
+    pub fn serve<H: Handler>(self, handle: &Handle, handler: H) -> Client {
         let service = Arc::new(HandleService(handler, self.client.clone()));
 
         let transport = Transport::new(

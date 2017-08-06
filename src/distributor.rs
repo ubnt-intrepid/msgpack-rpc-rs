@@ -1,32 +1,7 @@
 use std::collections::VecDeque;
 use futures::{Future, Stream, Sink, Poll, Async, AsyncSink};
 use futures::sync::mpsc::{UnboundedSender, UnboundedReceiver};
-use tokio_core::reactor::Handle;
 use super::message::{Message, Request, Response, Notification};
-
-
-/// A distributor of messages, contains a multiplexer and a demultiplexer.
-pub struct Distributor<T, U>
-where
-    T: Stream<Item = Message> + 'static,
-    U: Sink<SinkItem = Message> + 'static,
-{
-    pub(crate) demux: Demux<T>,
-    pub(crate) mux: Mux<U>,
-}
-
-impl<T, U> Distributor<T, U>
-where
-    T: Stream<Item = Message> + 'static,
-    U: Sink<SinkItem = Message> + 'static,
-{
-    /// Spawn the distributor on the event loop of `handle`.
-    pub fn launch(self, handle: &Handle) {
-        let Distributor { demux, mux } = self;
-        handle.spawn(demux);
-        handle.spawn(mux);
-    }
-}
 
 
 pub(crate) struct Demux<T: Stream<Item = Message>> {
