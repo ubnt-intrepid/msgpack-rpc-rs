@@ -1,5 +1,26 @@
-[workspace]
-members = [
-  "lib/",
-  "examples/*",
-]
+[package]
+name = "msgpack-rpc"
+description = "An implementation of Msgpack-RPC, focuses on bidirectional connection"
+version = "0.1.0-pre"
+authors = ["Yusuke Sasaki <yusuke.sasaki.nuem@gmail.com>"]
+license = "MIT/Apache-2.0"
+repository = "https://github.com/ubnt-intrepid/msgpack-rpc-rs"
+
+[dependencies]
+bytes = "~0.4"
+futures = "~0.1"
+tokio-core = "~0.1"
+tokio-io = "~0.1"
+tokio-proto = "~0.1"
+tokio-process = "~0.1"
+tokio-service = "~0.1"
+rmpv = { version = "~0.4", default-features = false }
+
+[dev-dependencies]
+serde = "~1.0"
+serde_derive = "~1.0"
+tokio-timer = "~0.1"
+
+[features]
+unstable = []
+with-serde = ["rmpv/with-serde"]
