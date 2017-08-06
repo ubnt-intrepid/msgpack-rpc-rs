@@ -7,7 +7,7 @@ extern crate rmpv;
 extern crate serde_derive;
 extern crate serde;
 
-use msgpack_rpc::{from_io, Client, Handler};
+use msgpack_rpc::{Endpoint, Client, Handler};
 use msgpack_rpc::io::{StdioStream, ChildProcessStream};
 use std::time::Duration;
 use futures::future::{Future, BoxFuture, FutureResult, empty, ok, err, join_all};
@@ -60,7 +60,7 @@ fn endpoint() {
     let stdio = StdioStream::new(4);
 
     // Launch a RPC endpoint with given service handlers.
-    let endpoint = from_io(&handle, stdio);
+    let endpoint = Endpoint::from_io(&handle, stdio);
     endpoint.launch(&handle, RootHandler);
 
     // start event loop infinitely.
@@ -76,12 +76,12 @@ fn client() {
     let child = ChildProcessStream::launch(&handle, program, vec!["--endpoint"]).unwrap();
 
     // Create a RPC client associated with the child process spawned above.
-    let endpoint = from_io(&handle, child);
+    let client = Endpoint::from_io(&handle, child).into_client();
 
     let task = join_all((0..10).map(move |i| {
         eprintln!("Request: {}", i);
         let response = if i == 4 {
-            endpoint.client().request(
+            client.request(
                 "0:function:delay",
                 to_value(DelayParam {
                     interval: 1,
@@ -89,10 +89,7 @@ fn client() {
                 }).unwrap(),
             )
         } else {
-            endpoint.client().request(
-                "0:function:the_answer",
-                Vec::<Value>::new(),
-            )
+            client.request("0:function:the_answer", Vec::<Value>::new())
         };
 
         response.and_then(|res| {

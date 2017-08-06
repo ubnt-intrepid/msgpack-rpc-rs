@@ -71,71 +71,21 @@ pub mod proto;
 
 pub use self::message::Message;
 pub use self::client::{Client, ClientFuture};
-pub use self::endpoint::{Endpoint, Handler};
+pub use self::endpoint::Endpoint;
 
-use futures::{Stream, Sink};
-use futures::sync::mpsc;
-use tokio_core::reactor::Handle;
-use tokio_io::{AsyncRead, AsyncWrite};
-use tokio_io::codec::{FramedRead, FramedWrite};
-
-use self::client::NewClient;
-use self::distributor::Distributor;
-use self::proto::Codec;
+use futures::Future;
+use rmpv::Value;
 
 
-/// Create a RPC client and an endpoint, associated with given I/O.
-pub fn from_io<T: AsyncRead + AsyncWrite + 'static>(handle: &Handle, io: T) -> Endpoint {
-    let (read, write) = io.split();
-    from_transport(
-        handle,
-        FramedRead::new(read, Codec),
-        FramedWrite::new(write, Codec),
-    )
-}
+/// aaa
+pub trait Handler: 'static {
+    type RequestFuture: Future<Item = Value, Error = Value>;
+    type NotifyFuture: Future<Item = (), Error = ()>;
 
-/// Create a RPC client and endpoint, associated with given stream/sink.
-pub fn from_transport<T, U>(handle: &Handle, stream: T, sink: U) -> Endpoint
-where
-    T: Stream<Item = Message> + 'static,
-    U: Sink<SinkItem = Message> + 'static,
-{
-    let (d_tx0, d_rx0) = mpsc::unbounded();
-    let (d_tx1, d_rx1) = mpsc::unbounded();
-    let (d_tx2, d_rx2) = mpsc::unbounded();
-    let (m_tx0, m_rx0) = mpsc::unbounded();
-    let (m_tx1, m_rx1) = mpsc::unbounded();
-    let (m_tx2, m_rx2) = mpsc::unbounded();
+    ///
+    fn handle_request(&self, method: &str, params: Value, client: &Client) -> Self::RequestFuture;
 
-    let client = NewClient {
-        tx_req: m_tx0,
-        rx_res: d_rx1,
-        tx_not: m_tx2,
-    };
-    let client = client.launch(handle);
-
-    let distributor = Distributor {
-        demux: distributor::Demux {
-            stream: Some(stream),
-            buffer: None,
-            tx0: d_tx0,
-            tx1: d_tx1,
-            tx2: d_tx2,
-        },
-        mux: distributor::Mux {
-            sink,
-            buffer: Default::default(),
-            rx0: m_rx0,
-            rx1: m_rx1,
-            rx2: m_rx2,
-        },
-    };
-    distributor.launch(handle);
-
-    Endpoint {
-        rx_req: d_rx0,
-        tx_res: m_tx1,
-        rx_not: d_rx2,
-        client,
-    }
+    ///
+    #[cfg_attr(rustfmt, rustfmt_skip)]
+    fn handle_notification(&self, method: &str, params: Value, client: &Client) -> Self::NotifyFuture;
 }
