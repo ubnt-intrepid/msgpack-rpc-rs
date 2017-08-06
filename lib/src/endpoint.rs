@@ -6,6 +6,8 @@ use tokio_core::reactor::Handle;
 use tokio_proto::BindServer;
 use tokio_service::Service;
 use rmpv::Value;
+
+use super::client::Client;
 use super::message::{Request, Response, Notification};
 use super::proto::{Proto, Transport};
 use super::util::io_error;
@@ -48,10 +50,15 @@ pub struct Endpoint {
     pub(crate) rx_req: UnboundedReceiver<(u64, Request)>,
     pub(crate) tx_res: UnboundedSender<(u64, Response)>,
     pub(crate) rx_not: UnboundedReceiver<Notification>,
+    pub(crate) client: Client,
 }
 
 
 impl Endpoint {
+    pub fn client(&self) -> &Client {
+        &self.client
+    }
+
     /// Spawn tasks to handle services on a event loop of `handle`, with given service handlers.
     ///
     pub fn launch<H: Handler>(self, handle: &Handle, handler: H) {
@@ -59,6 +66,7 @@ impl Endpoint {
             rx_req,
             tx_res,
             rx_not,
+            ..
         } = self;
 
         let handler = HandleService(Arc::new(handler));

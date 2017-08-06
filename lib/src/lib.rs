@@ -70,33 +70,32 @@ pub mod io;
 pub mod proto;
 
 pub use self::message::Message;
-pub use self::client::{Client, NewClient, ClientFuture};
-pub use self::distributor::Distributor;
+pub use self::client::{Client, ClientFuture};
 pub use self::endpoint::{Endpoint, Handler, HandleResult};
 
 use futures::{Stream, Sink};
 use futures::sync::mpsc;
+use tokio_core::reactor::Handle;
 use tokio_io::{AsyncRead, AsyncWrite};
-use tokio_io::io::{ReadHalf, WriteHalf};
 use tokio_io::codec::{FramedRead, FramedWrite};
+
+use self::client::NewClient;
+use self::distributor::Distributor;
 use self::proto::Codec;
 
 
 /// Create a RPC client and an endpoint, associated with given I/O.
-pub fn from_io<T>(
-    io: T,
-) -> (NewClient,
-      Endpoint,
-      Distributor<FramedRead<ReadHalf<T>, Codec>, FramedWrite<WriteHalf<T>, Codec>>)
-where
-    T: AsyncRead + AsyncWrite + 'static,
-{
+pub fn from_io<T: AsyncRead + AsyncWrite + 'static>(handle: &Handle, io: T) -> Endpoint {
     let (read, write) = io.split();
-    from_transport(FramedRead::new(read, Codec), FramedWrite::new(write, Codec))
+    from_transport(
+        handle,
+        FramedRead::new(read, Codec),
+        FramedWrite::new(write, Codec),
+    )
 }
 
 /// Create a RPC client and endpoint, associated with given stream/sink.
-pub fn from_transport<T, U>(stream: T, sink: U) -> (NewClient, Endpoint, Distributor<T, U>)
+pub fn from_transport<T, U>(handle: &Handle, stream: T, sink: U) -> Endpoint
 where
     T: Stream<Item = Message> + 'static,
     U: Sink<SinkItem = Message> + 'static,
@@ -113,11 +112,8 @@ where
         rx_res: d_rx1,
         tx_not: m_tx2,
     };
-    let endpoint = Endpoint {
-        rx_req: d_rx0,
-        tx_res: m_tx1,
-        rx_not: d_rx2,
-    };
+    let client = client.launch(handle);
+
     let distributor = Distributor {
         demux: distributor::Demux {
             stream: Some(stream),
@@ -134,6 +130,12 @@ where
             rx2: m_rx2,
         },
     };
+    distributor.launch(handle);
 
-    (client, endpoint, distributor)
+    Endpoint {
+        rx_req: d_rx0,
+        tx_res: m_tx1,
+        rx_not: d_rx2,
+        client,
+    }
 }

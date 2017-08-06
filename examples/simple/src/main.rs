@@ -55,8 +55,7 @@ fn endpoint() {
     let stdio = StdioStream::new(4);
 
     // Launch a RPC endpoint with given service handlers.
-    let (_, endpoint, distributor) = from_io(stdio);
-    distributor.launch(&handle);
+    let endpoint = from_io(&handle, stdio);
     endpoint.launch(&handle, RootHandler);
 
     // start event loop infinitely.
@@ -72,11 +71,9 @@ fn client() {
     let child = ChildProcessStream::launch(&handle, program, vec!["--endpoint"]).unwrap();
 
     // Create a RPC client associated with the child process spawned above.
-    let client = {
-        let (client, _, distributor) = from_io(child);
-        distributor.launch(&handle);
-        client.launch(&handle)
-    };
+    let endpoint = from_io(&handle, child);
+    let client = endpoint.client().clone();
+    drop(endpoint);
 
     let task = join_all((0..10).map(move |i| {
         eprintln!("Request: {}", i);
