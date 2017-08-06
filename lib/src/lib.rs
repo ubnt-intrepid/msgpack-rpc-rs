@@ -75,6 +75,7 @@ pub use self::distributor::Distributor;
 pub use self::endpoint::{Endpoint, Handler, HandleResult};
 
 use futures::{Stream, Sink};
+use futures::sync::mpsc;
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_io::io::{ReadHalf, WriteHalf};
 use tokio_io::codec::{FramedRead, FramedWrite};
@@ -100,17 +101,38 @@ where
     T: Stream<Item = Message> + 'static,
     U: Sink<SinkItem = Message> + 'static,
 {
-    let (distributor, demux_out, mux_in) = distributor::distributor(stream, sink);
+    let (d_tx0, d_rx0) = mpsc::unbounded();
+    let (d_tx1, d_rx1) = mpsc::unbounded();
+    let (d_tx2, d_rx2) = mpsc::unbounded();
+    let (m_tx0, m_rx0) = mpsc::unbounded();
+    let (m_tx1, m_rx1) = mpsc::unbounded();
+    let (m_tx2, m_rx2) = mpsc::unbounded();
 
     let client = NewClient {
-        tx_req: mux_in.0,
-        rx_res: demux_out.1,
-        tx_not: mux_in.2,
+        tx_req: m_tx0,
+        rx_res: d_rx1,
+        tx_not: m_tx2,
     };
     let endpoint = Endpoint {
-        rx_req: demux_out.0,
-        tx_res: mux_in.1,
-        rx_not: demux_out.2,
+        rx_req: d_rx0,
+        tx_res: m_tx1,
+        rx_not: d_rx2,
+    };
+    let distributor = Distributor {
+        demux: distributor::Demux {
+            stream: Some(stream),
+            buffer: None,
+            tx0: d_tx0,
+            tx1: d_tx1,
+            tx2: d_tx2,
+        },
+        mux: distributor::Mux {
+            sink,
+            buffer: Default::default(),
+            rx0: m_rx0,
+            rx1: m_rx1,
+            rx2: m_rx2,
+        },
     };
 
     (client, endpoint, distributor)
