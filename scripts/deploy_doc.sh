@@ -8,7 +8,7 @@ GH_TOKEN=$3
 TRAVIS_REPO_SLUG=$4
 
 if [[ "${TRAVIS_BRANCH:-}" = "master" ]] && [[ "${TRAVIS_RUST_VERSION}" = "stable" ]]; then
-    cargo doc -p msgpack-rpc --all-features --no-deps
+    cargo doc --all-features --no-deps
 
     # cargo install --force cobalt-bin
     # cobalt build -s site -d target/doc

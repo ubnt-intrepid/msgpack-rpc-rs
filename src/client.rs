@@ -1,5 +1,5 @@
 use std::io;
-use futures::{Future, Stream, Sink};
+use futures::{Future, Stream, Sink, Poll};
 use futures::sink::SinkMapErr;
 use futures::stream::MapErr;
 use futures::sync::mpsc::{UnboundedSender, UnboundedReceiver, SendError};
@@ -54,8 +54,16 @@ impl NewClient {
 
 
 /// The return type of `Client::request()`, represents a future of RPC request.
-pub type ClientFuture =
-    <ClientService<Transport, Proto> as Service>::Future;
+pub struct ClientFuture(<ClientService<Transport, Proto> as Service>::Future);
+
+impl Future for ClientFuture {
+    type Item = Response;
+    type Error = io::Error;
+    #[inline(always)]
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        self.0.poll()
+    }
+}
 
 
 /// A client of Msgpack-RPC
@@ -69,7 +77,7 @@ pub struct Client {
 impl Client {
     /// Send a request message to the server, and return a future of its response.
     pub fn request<S: Into<String>, P: Into<Value>>(&self, method: S, params: P) -> ClientFuture {
-        self.inner.call(Request::new(method, params))
+        ClientFuture { 0: self.inner.call(Request::new(method, params)) }
     }
 
     /// Send a notification message to the server.
