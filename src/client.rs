@@ -23,36 +23,6 @@ type Transport = proto::Transport<
 >;
 
 
-/// A builder of `Client`, which contains channels to interact with I/O.
-pub struct NewClient {
-    pub(crate) rx_res: UnboundedReceiver<(u64, Response)>,
-    pub(crate) tx_req: UnboundedSender<(u64, Request)>,
-    pub(crate) tx_not: UnboundedSender<Notification>,
-}
-
-impl NewClient {
-    /// Create a new `Client` with background task spawned on an event loop of `handle`.
-    pub fn launch(self, handle: &Handle) -> Client {
-        let NewClient {
-            rx_res,
-            tx_req,
-            tx_not,
-        } = self;
-        let transport = Transport::new(
-            rx_res.map_err((|()| io_error("rx_res")) as fn(()) -> io::Error),
-            tx_req.sink_map_err((|_| io_error("tx_req")) as fn(SendError<(u64, Request)>) -> io::Error),
-        );
-
-        let inner = Proto.bind_client(handle, transport);
-        Client {
-            inner,
-            tx_not,
-            handle: handle.remote().clone(),
-        }
-    }
-}
-
-
 /// The return type of `Client::request()`, represents a future of RPC request.
 pub struct ClientFuture(<ClientService<Transport, Proto> as Service>::Future);
 
@@ -75,6 +45,26 @@ pub struct Client {
 }
 
 impl Client {
+    /// Create a new `Client` with background task spawned on an event loop of `handle`.
+    pub fn new(
+        handle: &Handle,
+        tx_req: UnboundedSender<(u64, Request)>,
+        rx_res: UnboundedReceiver<(u64, Response)>,
+        tx_not: UnboundedSender<Notification>,
+    ) -> Self {
+        let transport = Transport::new(
+            rx_res.map_err((|()| io_error("rx_res")) as fn(()) -> io::Error),
+            tx_req.sink_map_err((|_| io_error("tx_req")) as fn(SendError<(u64, Request)>) -> io::Error),
+        );
+
+        let inner = Proto.bind_client(handle, transport);
+        Client {
+            inner,
+            tx_not,
+            handle: handle.remote().clone(),
+        }
+    }
+
     /// Send a request message to the server, and return a future of its response.
     pub fn request<S: Into<String>, P: Into<Value>>(&self, method: S, params: P) -> ClientFuture {
         ClientFuture { 0: self.inner.call(Request::new(method, params)) }

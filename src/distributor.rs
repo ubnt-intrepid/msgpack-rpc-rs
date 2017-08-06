@@ -5,14 +5,29 @@ use super::message::{Message, Request, Response, Notification};
 
 
 pub(crate) struct Demux<T: Stream<Item = Message>> {
-    pub(crate) stream: Option<T>,
-    pub(crate) buffer: Option<Message>,
-    pub(crate) tx0: UnboundedSender<(u64, Request)>,
-    pub(crate) tx1: UnboundedSender<(u64, Response)>,
-    pub(crate) tx2: UnboundedSender<Notification>,
+    stream: Option<T>,
+    buffer: Option<Message>,
+    tx0: UnboundedSender<(u64, Request)>,
+    tx1: UnboundedSender<(u64, Response)>,
+    tx2: UnboundedSender<Notification>,
 }
 
 impl<T: Stream<Item = Message>> Demux<T> {
+    pub(crate) fn new(
+        stream: T,
+        tx0: UnboundedSender<(u64, Request)>,
+        tx1: UnboundedSender<(u64, Response)>,
+        tx2: UnboundedSender<Notification>,
+    ) -> Self {
+        Demux {
+            stream: Some(stream),
+            buffer: None,
+            tx0,
+            tx1,
+            tx2,
+        }
+    }
+
     fn stream_mut(&mut self) -> &mut T {
         self.stream.as_mut().take().unwrap()
     }
@@ -70,14 +85,29 @@ impl<T: Stream<Item = Message>> Future for Demux<T> {
 
 
 pub(crate) struct Mux<U: Sink<SinkItem = Message>> {
-    pub(crate) sink: U,
-    pub(crate) buffer: VecDeque<Message>,
-    pub(crate) rx0: UnboundedReceiver<(u64, Request)>,
-    pub(crate) rx1: UnboundedReceiver<(u64, Response)>,
-    pub(crate) rx2: UnboundedReceiver<Notification>,
+    sink: U,
+    buffer: VecDeque<Message>,
+    rx0: UnboundedReceiver<(u64, Request)>,
+    rx1: UnboundedReceiver<(u64, Response)>,
+    rx2: UnboundedReceiver<Notification>,
 }
 
 impl<U: Sink<SinkItem = Message>> Mux<U> {
+    pub(crate) fn new(
+        sink: U,
+        rx0: UnboundedReceiver<(u64, Request)>,
+        rx1: UnboundedReceiver<(u64, Response)>,
+        rx2: UnboundedReceiver<Notification>,
+    ) -> Self {
+        Mux {
+            sink,
+            buffer: Default::default(),
+            rx0,
+            rx1,
+            rx2,
+        }
+    }
+
     fn try_recv(&mut self) -> Poll<Option<usize>, ()> {
         let mut count = 0;
         let done0 = do_recv(&mut self.rx0, &mut self.buffer, &mut count)?;

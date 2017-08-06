@@ -11,7 +11,7 @@ use tokio_service::Service;
 use rmpv::Value;
 
 use super::Handler;
-use super::client::{Client, NewClient};
+use super::client::Client;
 use super::distributor::{Demux, Mux};
 use super::message::{Message, Request, Response, Notification};
 use super::proto::{Codec, Proto, Transport};
@@ -70,6 +70,7 @@ impl Endpoint {
         T: Stream<Item = Message> + 'static,
         U: Sink<SinkItem = Message> + 'static,
     {
+        // create wires.
         let (d_tx0, d_rx0) = mpsc::unbounded();
         let (d_tx1, d_rx1) = mpsc::unbounded();
         let (d_tx2, d_rx2) = mpsc::unbounded();
@@ -77,28 +78,12 @@ impl Endpoint {
         let (m_tx1, m_rx1) = mpsc::unbounded();
         let (m_tx2, m_rx2) = mpsc::unbounded();
 
-        let client = NewClient {
-            tx_req: m_tx0,
-            rx_res: d_rx1,
-            tx_not: m_tx2,
-        };
-        let client = client.launch(handle);
+        // start multiplexer/demultiplexer.
+        handle.spawn(Demux::new(stream, d_tx0, d_tx1, d_tx2));
+        handle.spawn(Mux::new(sink, m_rx0, m_rx1, m_rx2));
 
-        handle.spawn(Demux {
-            stream: Some(stream),
-            buffer: None,
-            tx0: d_tx0,
-            tx1: d_tx1,
-            tx2: d_tx2,
-        });
-
-        handle.spawn(Mux {
-            sink,
-            buffer: Default::default(),
-            rx0: m_rx0,
-            rx1: m_rx1,
-            rx2: m_rx2,
-        });
+        // start client
+        let client = Client::new(handle, m_tx0, d_rx1, m_tx2);
 
         Endpoint {
             rx_req: d_rx0,
