@@ -6,15 +6,9 @@
 //! # Example
 //!
 //! ```ignore
-//! // Create a tuple of RPC components from an I/O.
-//! let (client, endpoint, distibutor) = msgpack_rpc::from_io(StdioStream::new(4, 4));
-//!
-//! // You must launch the distributor on certain event loop.
-//! // It will executes tasks which process encoding/decoding Msgpack-RPC messages.
-//! distributor.launch(&handle);
-//!
-//! // Launch a client on an event loop.
-//! let client = client.launch(&handle);
+//! // Create a client from an I/O.
+//! let endpoint = msgpack_rpc::Endpoint::from_io(&handle, StdioStream::new(4, 4));
+//! let client = endpoint.into_client();
 //!
 //! // Call a precedure and receive its response asynchronously.
 //! let task = client.request("hello", vec![])
@@ -58,7 +52,7 @@ extern crate tokio_io;
 extern crate tokio_proto;
 extern crate tokio_service;
 extern crate tokio_process;
-extern crate rmp;
+#[doc(hidden)]
 pub extern crate rmpv;
 
 mod client;
@@ -69,71 +63,23 @@ mod util;
 pub mod io;
 pub mod proto;
 
+pub use rmpv::Value;
 pub use self::message::Message;
-pub use self::client::{Client, NewClient, ClientFuture};
-pub use self::distributor::Distributor;
-pub use self::endpoint::{Endpoint, Handler, HandleResult};
+pub use self::client::{Client, ClientFuture};
+pub use self::endpoint::Endpoint;
 
-use futures::{Stream, Sink};
-use futures::sync::mpsc;
-use tokio_io::{AsyncRead, AsyncWrite};
-use tokio_io::io::{ReadHalf, WriteHalf};
-use tokio_io::codec::{FramedRead, FramedWrite};
-use self::proto::Codec;
+use futures::Future;
 
 
-/// Create a RPC client and an endpoint, associated with given I/O.
-pub fn from_io<T>(
-    io: T,
-) -> (NewClient,
-      Endpoint,
-      Distributor<FramedRead<ReadHalf<T>, Codec>, FramedWrite<WriteHalf<T>, Codec>>)
-where
-    T: AsyncRead + AsyncWrite + 'static,
-{
-    let (read, write) = io.split();
-    from_transport(FramedRead::new(read, Codec), FramedWrite::new(write, Codec))
-}
+/// aaa
+pub trait Handler: 'static {
+    type RequestFuture: Future<Item = Value, Error = Value>;
+    type NotifyFuture: Future<Item = (), Error = ()>;
 
-/// Create a RPC client and endpoint, associated with given stream/sink.
-pub fn from_transport<T, U>(stream: T, sink: U) -> (NewClient, Endpoint, Distributor<T, U>)
-where
-    T: Stream<Item = Message> + 'static,
-    U: Sink<SinkItem = Message> + 'static,
-{
-    let (d_tx0, d_rx0) = mpsc::unbounded();
-    let (d_tx1, d_rx1) = mpsc::unbounded();
-    let (d_tx2, d_rx2) = mpsc::unbounded();
-    let (m_tx0, m_rx0) = mpsc::unbounded();
-    let (m_tx1, m_rx1) = mpsc::unbounded();
-    let (m_tx2, m_rx2) = mpsc::unbounded();
+    ///
+    fn handle_request(&self, method: &str, params: Value, client: &Client) -> Self::RequestFuture;
 
-    let client = NewClient {
-        tx_req: m_tx0,
-        rx_res: d_rx1,
-        tx_not: m_tx2,
-    };
-    let endpoint = Endpoint {
-        rx_req: d_rx0,
-        tx_res: m_tx1,
-        rx_not: d_rx2,
-    };
-    let distributor = Distributor {
-        demux: distributor::Demux {
-            stream: Some(stream),
-            buffer: None,
-            tx0: d_tx0,
-            tx1: d_tx1,
-            tx2: d_tx2,
-        },
-        mux: distributor::Mux {
-            sink,
-            buffer: Default::default(),
-            rx0: m_rx0,
-            rx1: m_rx1,
-            rx2: m_rx2,
-        },
-    };
-
-    (client, endpoint, distributor)
+    ///
+    #[cfg_attr(rustfmt, rustfmt_skip)]
+    fn handle_notification(&self, method: &str, params: Value, client: &Client) -> Self::NotifyFuture;
 }
