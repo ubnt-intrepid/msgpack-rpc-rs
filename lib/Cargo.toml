@@ -15,7 +15,6 @@ tokio-proto = "~0.1"
 tokio-process = "~0.1"
 tokio-service = "~0.1"
 
-rmp = "~0.8"
 rmpv = { version = "~0.4", features = ["with-serde"] }
 
 [features]

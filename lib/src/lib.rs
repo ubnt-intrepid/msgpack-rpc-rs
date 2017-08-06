@@ -6,15 +6,9 @@
 //! # Example
 //!
 //! ```ignore
-//! // Create a tuple of RPC components from an I/O.
-//! let (client, endpoint, distibutor) = msgpack_rpc::from_io(StdioStream::new(4, 4));
-//!
-//! // You must launch the distributor on certain event loop.
-//! // It will executes tasks which process encoding/decoding Msgpack-RPC messages.
-//! distributor.launch(&handle);
-//!
-//! // Launch a client on an event loop.
-//! let client = client.launch(&handle);
+//! // Create a client from an I/O.
+//! let endpoint = msgpack_rpc::Endpoint::from_io(&handle, StdioStream::new(4, 4));
+//! let client = endpoint.into_client();
 //!
 //! // Call a precedure and receive its response asynchronously.
 //! let task = client.request("hello", vec![])
@@ -58,7 +52,7 @@ extern crate tokio_io;
 extern crate tokio_proto;
 extern crate tokio_service;
 extern crate tokio_process;
-extern crate rmp;
+#[doc(hidden)]
 pub extern crate rmpv;
 
 mod client;
@@ -69,12 +63,12 @@ mod util;
 pub mod io;
 pub mod proto;
 
+pub use rmpv::Value;
 pub use self::message::Message;
 pub use self::client::{Client, ClientFuture};
 pub use self::endpoint::Endpoint;
 
 use futures::Future;
-use rmpv::Value;
 
 
 /// aaa

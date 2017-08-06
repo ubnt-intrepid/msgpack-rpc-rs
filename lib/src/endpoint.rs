@@ -37,6 +37,12 @@ impl<H: Handler> Service for HandleService<H> {
     }
 }
 
+impl<H: Handler> HandleService<H> {
+    fn call_not(&self, not: Notification) -> H::NotifyFuture {
+        self.0.handle_notification(&not.method, not.params, &self.1)
+    }
+}
+
 
 /// An endpoint of Msgpack-RPC
 pub struct Endpoint {
@@ -121,18 +127,9 @@ impl Endpoint {
             self.tx_res.sink_map_err(|_| io_error("tx_res")),
         );
 
+        // Spawn services
         Proto.bind_server(&handle, transport, service.clone());
-
-        handle.spawn(self.rx_not.for_each({
-            let client = self.client.clone();
-            move |not| {
-                service.0.handle_notification(
-                    &not.method,
-                    not.params,
-                    &client,
-                )
-            }
-        }));
+        handle.spawn(self.rx_not.for_each(move |not| service.call_not(not)));
 
         self.client
     }
