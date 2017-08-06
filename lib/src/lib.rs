@@ -71,7 +71,7 @@ pub mod proto;
 
 pub use self::message::Message;
 pub use self::client::{Client, ClientFuture};
-pub use self::endpoint::{Endpoint, Handler, HandleResult};
+pub use self::endpoint::{Endpoint, Handler};
 
 use futures::{Stream, Sink};
 use futures::sync::mpsc;

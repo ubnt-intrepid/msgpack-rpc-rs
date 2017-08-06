@@ -1,6 +1,7 @@
 use std::io;
 use std::sync::Arc;
-use futures::{Future, Stream, Sink, BoxFuture};
+use futures::{Future, Stream, Sink};
+use futures::future::Then;
 use futures::sync::mpsc::{UnboundedSender, UnboundedReceiver};
 use tokio_core::reactor::Handle;
 use tokio_proto::BindServer;
@@ -13,34 +14,36 @@ use super::proto::{Proto, Transport};
 use super::util::io_error;
 
 
-#[allow(unused_variables)]
+/// aaa
 pub trait Handler: 'static {
-    ///
-    fn handle_request(&self, method: &str, params: Value) -> HandleResult;
+    type RequestFuture: Future<Item = Value, Error = Value>;
+    type NotifyFuture: Future<Item = (), Error = ()>;
 
     ///
-    fn handle_notification(&self, method: &str, params: Value) -> HandleResult<()> {
-        ::futures::future::ok(()).boxed()
-    }
+    fn handle_request(&self, method: &str, params: Value, client: &Client) -> Self::RequestFuture;
+
+    ///
+    #[cfg_attr(rustfmt, rustfmt_skip)]
+    fn handle_notification(&self, method: &str, params: Value, client: &Client) -> Self::NotifyFuture;
 }
 
-pub type HandleResult<T = Result<Value, Value>> = BoxFuture<T, ()>;
 
+struct HandleService<H: Handler>(H, Client);
 
-#[derive(Clone)]
-struct HandleService(Arc<Handler>);
-
-impl Service for HandleService {
+impl<H: Handler> Service for HandleService<H> {
     type Request = Request;
     type Response = Response;
     type Error = io::Error;
-    type Future = BoxFuture<Response, io::Error>;
+    type Future = Then<
+        H::RequestFuture,
+        Result<Response, io::Error>,
+        fn(Result<Value, Value>) -> Result<Response, io::Error>,
+    >;
+
     fn call(&self, req: Request) -> Self::Future {
         self.0
-            .handle_request(&req.method, req.params)
-            .map(Response::from)
-            .map_err(|_| io_error("HandleService::call"))
-            .boxed()
+            .handle_request(&req.method, req.params, &self.1)
+            .then(|res| Ok(Response::from(res)))
     }
 }
 
@@ -60,25 +63,27 @@ impl Endpoint {
     }
 
     /// Spawn tasks to handle services on a event loop of `handle`, with given service handlers.
-    ///
-    pub fn launch<H: Handler>(self, handle: &Handle, handler: H) {
-        let Endpoint {
-            rx_req,
-            tx_res,
-            rx_not,
-            ..
-        } = self;
-
-        let handler = HandleService(Arc::new(handler));
+    pub fn launch<H: Handler>(self, handle: &Handle, handler: H) -> Client {
+        let service = Arc::new(HandleService(handler, self.client.clone()));
 
         let transport = Transport::new(
-            rx_req.map_err(|()| io_error("rx_req")),
-            tx_res.sink_map_err(|_| io_error("tx_res")),
+            self.rx_req.map_err(|()| io_error("rx_req")),
+            self.tx_res.sink_map_err(|_| io_error("tx_res")),
         );
-        Proto.bind_server(&handle, transport, handler.clone());
 
-        handle.spawn(rx_not.for_each(move |not| {
-            handler.0.handle_notification(&not.method, not.params)
+        Proto.bind_server(&handle, transport, service.clone());
+
+        handle.spawn(self.rx_not.for_each({
+            let client = self.client.clone();
+            move |not| {
+                service.0.handle_notification(
+                    &not.method,
+                    not.params,
+                    &client,
+                )
+            }
         }));
+
+        self.client
     }
 }

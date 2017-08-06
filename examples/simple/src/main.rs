@@ -7,11 +7,10 @@ extern crate rmpv;
 extern crate serde_derive;
 extern crate serde;
 
-use msgpack_rpc::{from_io, Handler, HandleResult};
+use msgpack_rpc::{from_io, Client, Handler};
 use msgpack_rpc::io::{StdioStream, ChildProcessStream};
 use std::time::Duration;
-use futures::Future;
-use futures::future::{empty, ok, join_all};
+use futures::future::{Future, BoxFuture, FutureResult, empty, ok, err, join_all};
 use tokio_core::reactor::Core;
 use tokio_timer::Timer;
 use rmpv::Value;
@@ -27,23 +26,29 @@ struct DelayParam {
 pub struct RootHandler;
 
 impl Handler for RootHandler {
-    fn handle_request(&self, method: &str, params: Value) -> HandleResult {
+    type RequestFuture = BoxFuture<Value, Value>;
+    type NotifyFuture = FutureResult<(), ()>;
+
+    fn handle_request(&self, method: &str, params: Value, _: &Client) -> Self::RequestFuture {
         match method {
-            "0:function:the_answer" => ok(Ok(42u64.into())).boxed(),
+            "0:function:the_answer" => ok(42u64.into()).boxed(),
             "0:function:delay" => {
                 match from_value(params) {
                     Ok(DelayParam { interval, message }) => {
                         Timer::default()
                             .sleep(Duration::from_secs(interval))
-                            .map_err(|_| ())
-                            .map(move |_| Ok(message.into()))
+                            .then(move |_| Ok(message.into()))
                             .boxed()
                     }
-                    Err(e) => ok(Err(e.to_string().into())).boxed(),
+                    Err(e) => err(e.to_string().into()).boxed(),
                 }
             }
-            m => ok(Err(format!("The method is not found: {:?}", m).into())).boxed(),
+            m => err(format!("The method is not found: {:?}", m).into()).boxed(),
         }
+    }
+
+    fn handle_notification(&self, _: &str, _: Value, _: &Client) -> Self::NotifyFuture {
+        ok(())
     }
 }
 
@@ -72,13 +77,11 @@ fn client() {
 
     // Create a RPC client associated with the child process spawned above.
     let endpoint = from_io(&handle, child);
-    let client = endpoint.client().clone();
-    drop(endpoint);
 
     let task = join_all((0..10).map(move |i| {
         eprintln!("Request: {}", i);
         let response = if i == 4 {
-            client.request(
+            endpoint.client().request(
                 "0:function:delay",
                 to_value(DelayParam {
                     interval: 1,
@@ -86,7 +89,10 @@ fn client() {
                 }).unwrap(),
             )
         } else {
-            client.request("0:function:the_answer", Vec::<Value>::new())
+            endpoint.client().request(
+                "0:function:the_answer",
+                Vec::<Value>::new(),
+            )
         };
 
         response.and_then(|res| {
@@ -95,7 +101,7 @@ fn client() {
         })
     }));
 
-    core.run(task).unwrap();;
+    core.run(task).unwrap();
 }
 
 fn main() {
