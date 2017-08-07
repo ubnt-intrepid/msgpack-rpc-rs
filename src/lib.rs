@@ -72,7 +72,6 @@ mod client;
 mod distributor;
 mod endpoint;
 mod message;
-mod proto;
 mod util;
 
 pub mod io;

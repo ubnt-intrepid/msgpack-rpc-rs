@@ -13,8 +13,7 @@ use rmpv::Value;
 use super::Handler;
 use super::client::Client;
 use super::distributor::{Demux, Mux};
-use super::message::{Request, Response, Notification};
-use super::proto::Codec;
+use super::message::{Codec, Request, Response, Notification};
 use super::util::io_error;
 
 
