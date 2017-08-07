@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 use futures::{Future, Stream, Sink, Poll, Async, AsyncSink};
 use futures::sync::mpsc::{UnboundedSender, UnboundedReceiver};
+use futures::sync::oneshot;
 use super::message::{EncoderMessage, DecoderMessage, Request, Response, Notification};
 
 
@@ -41,7 +42,6 @@ impl<T: Stream<Item = DecoderMessage>> Demux<T> {
                     self.buffer = Some(DecoderMessage::Request(id, req));
                     return Ok(Async::NotReady);
                 }
-                Ok(Async::Ready(()))
             }
             DecoderMessage::Response(id, res) => {
                 if let AsyncSink::NotReady((id, res)) =
@@ -50,16 +50,15 @@ impl<T: Stream<Item = DecoderMessage>> Demux<T> {
                     self.buffer = Some(DecoderMessage::Response(id, res));
                     return Ok(Async::NotReady);
                 }
-                Ok(Async::Ready(()))
             }
             DecoderMessage::Notification(not) => {
                 if let AsyncSink::NotReady(not) = self.tx2.start_send(not).map_err(|_| ())? {
                     self.buffer = Some(DecoderMessage::Notification(not));
                     return Ok(Async::NotReady);
                 }
-                Ok(Async::Ready(()))
             }
         }
+        Ok(Async::Ready(()))
     }
 }
 
@@ -73,7 +72,7 @@ impl<T: Stream<Item = DecoderMessage>> Future for Demux<T> {
         }
 
         loop {
-            match try!(self.stream_mut().poll().map_err(|_| ())) {
+            match self.stream_mut().poll().map_err(|_| ())? {
                 Async::Ready(Some(item)) => try_ready!(self.try_start_send(item)),
                 Async::Ready(None) => {
                     try_ready!(self.tx0.close().map_err(|_| ()));
@@ -94,7 +93,6 @@ impl<T: Stream<Item = DecoderMessage>> Future for Demux<T> {
 }
 
 
-use futures::sync::oneshot;
 
 pub(crate) struct Mux<U: Sink<SinkItem = EncoderMessage>> {
     sink: U,
@@ -120,48 +118,42 @@ impl<U: Sink<SinkItem = EncoderMessage>> Mux<U> {
         }
     }
 
-    fn try_recv(&mut self) -> Poll<Option<usize>, ()> {
+    fn try_recv(&mut self) -> Poll<bool, ()> {
         let mut count = 0;
-        let done0 = {
-            match self.rx0.poll()? {
-                Async::Ready(Some((id, req))) => {
-                    self.buffer.push_back(EncoderMessage::Request(id, req));
-                    count += 1;
-                    false
-                }
-                Async::Ready(None) => true,
-                Async::NotReady => false,
+        let done0 = match self.rx0.poll()? {
+            Async::Ready(Some((id, req))) => {
+                self.buffer.push_back(EncoderMessage::Request(id, req));
+                count += 1;
+                false
             }
+            Async::Ready(None) => true,
+            Async::NotReady => false,
         };
-        let done1 = {
-            match self.rx1.poll()? {
-                Async::Ready(Some((id, res))) => {
-                    self.buffer.push_back(EncoderMessage::Response(id, res));
-                    count += 1;
-                    false
-                }
-                Async::Ready(None) => true,
-                Async::NotReady => false,
+        let done1 = match self.rx1.poll()? {
+            Async::Ready(Some((id, res))) => {
+                self.buffer.push_back(EncoderMessage::Response(id, res));
+                count += 1;
+                false
             }
+            Async::Ready(None) => true,
+            Async::NotReady => false,
         };
-        let done2 = {
-            match self.rx2.poll()? {
-                Async::Ready(Some((not, sender))) => {
-                    self.buffer.push_back(
-                        EncoderMessage::Notification(not, sender),
-                    );
-                    count += 1;
-                    false
-                }
-                Async::Ready(None) => true,
-                Async::NotReady => false,
+        let done2 = match self.rx2.poll()? {
+            Async::Ready(Some((not, sender))) => {
+                self.buffer.push_back(
+                    EncoderMessage::Notification(not, sender),
+                );
+                count += 1;
+                false
             }
+            Async::Ready(None) => true,
+            Async::NotReady => false,
         };
 
         if done0 && done1 && done2 {
-            Ok(Async::Ready(None))
+            Ok(Async::Ready(true))
         } else if count > 0 {
-            Ok(Async::Ready(Some(count)))
+            Ok(Async::Ready(false))
         } else {
             Ok(Async::NotReady)
         }
@@ -188,12 +180,12 @@ impl<U: Sink<SinkItem = EncoderMessage>> Future for Mux<U> {
         try_ready!(self.start_send());
         debug_assert!(self.buffer.len() == 0);
         loop {
-            match try!(self.try_recv()) {
-                Async::Ready(Some(_len)) => try_ready!(self.start_send()),
-                Async::Ready(None) => {
+            match self.try_recv()? {
+                Async::Ready(true) => {
                     try_ready!(self.sink.close().map_err(|_| ()));
                     return Ok(Async::Ready(()));
                 }
+                Async::Ready(false) => try_ready!(self.start_send()),
                 Async::NotReady => {
                     try_ready!(self.sink.poll_complete().map_err(|_| ()));
                     return Ok(Async::NotReady);

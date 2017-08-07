@@ -8,17 +8,17 @@ use tokio_proto::multiplex::ClientService;
 use tokio_service::Service;
 use rmpv::Value;
 
-use super::message::{Request, Response, Notification};
+use super::message;
 use super::util::io_error;
 
 
 struct ClientTransport {
-    stream: UnboundedReceiver<(u64, Response)>,
-    sink: UnboundedSender<(u64, Request)>,
+    stream: UnboundedReceiver<(u64, message::Response)>,
+    sink: UnboundedSender<(u64, message::Request)>,
 }
 
 impl Stream for ClientTransport {
-    type Item = (u64, Response);
+    type Item = (u64, message::Response);
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
@@ -29,7 +29,7 @@ impl Stream for ClientTransport {
 }
 
 impl Sink for ClientTransport {
-    type SinkItem = (u64, Request);
+    type SinkItem = (u64, message::Request);
     type SinkError = io::Error;
 
     fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
@@ -49,8 +49,8 @@ impl Sink for ClientTransport {
 struct ClientProto;
 
 impl ::tokio_proto::multiplex::ClientProto<ClientTransport> for ClientProto {
-    type Request = Request;
-    type Response = Response;
+    type Request = message::Request;
+    type Response = message::Response;
     type Transport = ClientTransport;
     type BindTransport = io::Result<Self::Transport>;
     fn bind_transport(&self, transport: Self::Transport) -> Self::BindTransport {
@@ -60,9 +60,9 @@ impl ::tokio_proto::multiplex::ClientProto<ClientTransport> for ClientProto {
 
 
 /// The return type of `Client::request()`, represents a future of RPC request.
-pub struct ClientResponse(<ClientService<ClientTransport, ClientProto> as Service>::Future);
+pub struct Response(<ClientService<ClientTransport, ClientProto> as Service>::Future);
 
-impl Future for ClientResponse {
+impl Future for Response {
     type Item = Result<Value, Value>;
     type Error = io::Error;
 
@@ -92,7 +92,7 @@ impl Future for Ack {
 #[derive(Clone)]
 pub struct Client {
     inner: ClientService<ClientTransport, ClientProto>,
-    tx_not: UnboundedSender<(Notification, oneshot::Sender<()>)>,
+    tx_not: UnboundedSender<(message::Notification, oneshot::Sender<()>)>,
     handle: Remote,
 }
 
@@ -100,9 +100,9 @@ impl Client {
     /// Create a new `Client` with background task spawned on an event loop of `handle`.
     pub fn new(
         handle: &Handle,
-        tx_req: UnboundedSender<(u64, Request)>,
-        rx_res: UnboundedReceiver<(u64, Response)>,
-        tx_not: UnboundedSender<(Notification, oneshot::Sender<()>)>,
+        tx_req: UnboundedSender<(u64, message::Request)>,
+        rx_res: UnboundedReceiver<(u64, message::Response)>,
+        tx_not: UnboundedSender<(message::Notification, oneshot::Sender<()>)>,
     ) -> Self {
         let transport = ClientTransport {
             stream: rx_res,
@@ -118,13 +118,13 @@ impl Client {
     }
 
     /// Send a request message to the server, and return a future of its response.
-    pub fn request<S: Into<String>, P: Into<Value>>(&self, method: S, params: P) -> ClientResponse {
-        ClientResponse { 0: self.inner.call(Request::new(method, params)) }
+    pub fn request<S: Into<String>, P: Into<Value>>(&self, method: S, params: P) -> Response {
+        Response { 0: self.inner.call(message::Request::new(method, params)) }
     }
 
     /// Send a notification message to the server.
     pub fn notify<S: Into<String>, P: Into<Value>>(&self, method: S, params: P) -> Ack {
-        let not = Notification::new(method, params);
+        let not = message::Notification::new(method, params);
 
         let tx = self.tx_not.clone();
         let (tx_done, rx_done) = oneshot::channel();
