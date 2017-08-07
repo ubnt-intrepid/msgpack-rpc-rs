@@ -56,7 +56,7 @@ fn main() {
         }
     });
 
-    if let Err(e) = core.run(task.join(futures::future::empty::<(),std::io::Error>())) {
+    if let Err(e) = core.run(task) {
         eprintln!("failed with: {}", e);
     }
 }

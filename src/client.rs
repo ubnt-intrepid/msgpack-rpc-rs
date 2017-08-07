@@ -10,7 +10,7 @@ use tokio_service::Service;
 use rmpv::Value;
 
 use super::message::{Request, Response, Notification};
-use super::proto::{ Proto};
+use super::proto::Proto;
 use super::util::io_error;
 
 
@@ -70,12 +70,13 @@ impl Future for ClientFuture {
     }
 }
 
+use futures::sync::oneshot;
 
 /// A client of Msgpack-RPC
 #[derive(Clone)]
 pub struct Client {
     inner: ClientService<__ClientTransport, Proto>,
-    tx_not: UnboundedSender<Notification>,
+    tx_not: UnboundedSender<(Notification, oneshot::Sender<()>)>,
     handle: Remote,
 }
 
@@ -85,7 +86,7 @@ impl Client {
         handle: &Handle,
         tx_req: UnboundedSender<(u64, Request)>,
         rx_res: UnboundedReceiver<(u64, Response)>,
-        tx_not: UnboundedSender<Notification>,
+        tx_not: UnboundedSender<(Notification, oneshot::Sender<()>)>,
     ) -> Self {
         let transport = __ClientTransport {
             0:rx_res.map_err((|()| io_error("rx_res")) as fn(()) -> io::Error),
@@ -113,12 +114,15 @@ impl Client {
     ) -> BoxFuture<(), ()> {
         let tx = self.tx_not.clone();
         let not = Notification::new(method, params);
-        tx.send(not)
-            .map(|_| {
-                eprintln!("[debug]");
-                ()
-            })
-            .map_err(|_| ())
-            .boxed()
+        let (otx, orx) = oneshot::channel();
+        self.handle.spawn(|_| {
+            tx.send((not, otx))
+                .map(|_| {
+                    eprintln!("[debug]");
+                    ()
+                })
+                .map_err(|_| ())
+        });
+        orx.map_err(|_| ()).boxed()
     }
 }
