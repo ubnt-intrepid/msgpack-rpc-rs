@@ -118,12 +118,11 @@ impl<U: Sink<SinkItem = EncoderMessage>> Mux<U> {
         }
     }
 
-    fn try_recv(&mut self) -> Poll<bool, ()> {
-        let mut count = 0;
+    fn try_recv(&mut self) -> Poll<Option<Vec<EncoderMessage>>, ()> {
+        let mut buf = Vec::with_capacity(3);
         let done0 = match self.rx0.poll()? {
             Async::Ready(Some((id, req))) => {
-                self.buffer.push_back(EncoderMessage::Request(id, req));
-                count += 1;
+                buf.push(EncoderMessage::Request(id, req));
                 false
             }
             Async::Ready(None) => true,
@@ -131,8 +130,7 @@ impl<U: Sink<SinkItem = EncoderMessage>> Mux<U> {
         };
         let done1 = match self.rx1.poll()? {
             Async::Ready(Some((id, res))) => {
-                self.buffer.push_back(EncoderMessage::Response(id, res));
-                count += 1;
+                buf.push(EncoderMessage::Response(id, res));
                 false
             }
             Async::Ready(None) => true,
@@ -140,10 +138,7 @@ impl<U: Sink<SinkItem = EncoderMessage>> Mux<U> {
         };
         let done2 = match self.rx2.poll()? {
             Async::Ready(Some((not, sender))) => {
-                self.buffer.push_back(
-                    EncoderMessage::Notification(not, sender),
-                );
-                count += 1;
+                buf.push(EncoderMessage::Notification(not, sender));
                 false
             }
             Async::Ready(None) => true,
@@ -151,20 +146,18 @@ impl<U: Sink<SinkItem = EncoderMessage>> Mux<U> {
         };
 
         if done0 && done1 && done2 {
-            Ok(Async::Ready(true))
-        } else if count > 0 {
-            Ok(Async::Ready(false))
+            Ok(Async::Ready(None))
+        } else if buf.len() > 0 {
+            Ok(Async::Ready(Some(buf)))
         } else {
             Ok(Async::NotReady)
         }
     }
 
     fn start_send(&mut self) -> Poll<(), ()> {
-        if let Some(item) = self.buffer.pop_front() {
+        while let Some(item) = self.buffer.pop_front() {
             if let AsyncSink::NotReady(item) = self.sink.start_send(item).map_err(|_| ())? {
                 self.buffer.push_front(item);
-                return Ok(Async::NotReady);
-            } else if self.buffer.len() > 0 {
                 return Ok(Async::NotReady);
             }
         }
@@ -177,15 +170,18 @@ impl<U: Sink<SinkItem = EncoderMessage>> Future for Mux<U> {
     type Error = ();
 
     fn poll(&mut self) -> Poll<(), ()> {
-        try_ready!(self.start_send());
-        debug_assert!(self.buffer.len() == 0);
         loop {
+            try_ready!(self.start_send());
+            debug_assert!(self.buffer.len() == 0);
+
             match self.try_recv()? {
-                Async::Ready(true) => {
+                Async::Ready(Some(buf)) => {
+                    self.buffer.extend(buf);
+                }
+                Async::Ready(None) => {
                     try_ready!(self.sink.close().map_err(|_| ()));
                     return Ok(Async::Ready(()));
                 }
-                Async::Ready(false) => try_ready!(self.start_send()),
                 Async::NotReady => {
                     try_ready!(self.sink.poll_complete().map_err(|_| ()));
                     return Ok(Async::NotReady);
