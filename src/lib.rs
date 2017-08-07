@@ -77,7 +77,7 @@ mod util;
 pub mod io;
 
 pub use rmpv::Value;
-pub use self::client::{Client, ClientFuture};
+pub use self::client::{Client, ClientResponse, Ack};
 pub use self::endpoint::Endpoint;
 
 use std::rc::Rc;

@@ -1,5 +1,5 @@
 use std::io;
-use futures::{Future, Stream, Sink, Poll, BoxFuture, StartSend};
+use futures::{Future, Stream, Sink, Poll, Async, StartSend};
 use futures::sync::mpsc::{UnboundedSender, UnboundedReceiver};
 use futures::sync::oneshot;
 use tokio_core::reactor::{Handle, Remote};
@@ -60,17 +60,32 @@ impl ::tokio_proto::multiplex::ClientProto<ClientTransport> for ClientProto {
 
 
 /// The return type of `Client::request()`, represents a future of RPC request.
-pub struct ClientFuture(<ClientService<ClientTransport, ClientProto> as Service>::Future);
+pub struct ClientResponse(<ClientService<ClientTransport, ClientProto> as Service>::Future);
 
-impl Future for ClientFuture {
-    type Item = Response;
+impl Future for ClientResponse {
+    type Item = Result<Value, Value>;
     type Error = io::Error;
 
-    #[inline(always)]
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        self.0.poll()
+        let res = try_ready!(self.0.poll());
+        Ok(Async::Ready(res.into_inner()))
     }
 }
+
+
+pub struct Ack(oneshot::Receiver<()>);
+
+impl Future for Ack {
+    type Item = ();
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        self.0.poll().map_err(
+            |e| io_error(format!("Ack::poll(): {:?}", e)),
+        )
+    }
+}
+
 
 
 /// A client of Msgpack-RPC
@@ -103,22 +118,20 @@ impl Client {
     }
 
     /// Send a request message to the server, and return a future of its response.
-    pub fn request<S: Into<String>, P: Into<Value>>(&self, method: S, params: P) -> ClientFuture {
-        ClientFuture { 0: self.inner.call(Request::new(method, params)) }
+    pub fn request<S: Into<String>, P: Into<Value>>(&self, method: S, params: P) -> ClientResponse {
+        ClientResponse { 0: self.inner.call(Request::new(method, params)) }
     }
 
     /// Send a notification message to the server.
-    pub fn notify<S: Into<String>, P: Into<Value>>(
-        &self,
-        method: S,
-        params: P,
-    ) -> BoxFuture<(), ()> {
-        let tx = self.tx_not.clone();
+    pub fn notify<S: Into<String>, P: Into<Value>>(&self, method: S, params: P) -> Ack {
         let not = Notification::new(method, params);
-        let (otx, orx) = oneshot::channel();
+
+        let tx = self.tx_not.clone();
+        let (tx_done, rx_done) = oneshot::channel();
         self.handle.spawn(|_| {
-            tx.send((not, otx)).map(|_| ()).map_err(|_| ())
+            tx.send((not, tx_done)).map(|_| ()).map_err(|_| ())
         });
-        orx.map_err(|_| ()).boxed()
+
+        Ack { 0: rx_done }
     }
 }

@@ -167,9 +167,10 @@ impl Response {
 
     fn from_array(array: &[Value]) -> Result<DecoderMessage, DecodeError> {
         match (array[0].as_i64(), &array[1], &array[2]) {
-            (Some(id), val, &Value::Nil) => Ok(
-                DecoderMessage::Response(id as u64, Response(Ok(val.clone()))),
-            ),
+            (Some(id), val, &Value::Nil) => Ok(DecoderMessage::Response(
+                id as u64,
+                Response(Ok(val.clone())),
+            )),
             (Some(id), &Value::Nil, val) => Ok(DecoderMessage::Response(
                 id as u64,
                 Response(Err(val.clone())),

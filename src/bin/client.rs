@@ -39,12 +39,7 @@ fn main() {
 
         let client = Endpoint::from_io(&handle, stream).into_client();
         if opt.notify {
-            client
-                .notify(method, args)
-                .map_err(|_| {
-                    std::io::Error::new(std::io::ErrorKind::Other, "broken channel")
-                })
-                .boxed()
+            client.notify(method, args).boxed()
         } else {
             client
                 .request(method, args)

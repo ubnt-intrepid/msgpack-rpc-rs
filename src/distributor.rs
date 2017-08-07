@@ -125,9 +125,7 @@ impl<U: Sink<SinkItem = EncoderMessage>> Mux<U> {
         let done0 = {
             match self.rx0.poll()? {
                 Async::Ready(Some((id, req))) => {
-                    self.buffer.push_back(
-                        EncoderMessage::Request(id, req),
-                    );
+                    self.buffer.push_back(EncoderMessage::Request(id, req));
                     count += 1;
                     false
                 }
@@ -138,9 +136,7 @@ impl<U: Sink<SinkItem = EncoderMessage>> Mux<U> {
         let done1 = {
             match self.rx1.poll()? {
                 Async::Ready(Some((id, res))) => {
-                    self.buffer.push_back(
-                        EncoderMessage::Response(id, res),
-                    );
+                    self.buffer.push_back(EncoderMessage::Response(id, res));
                     count += 1;
                     false
                 }
@@ -152,10 +148,7 @@ impl<U: Sink<SinkItem = EncoderMessage>> Mux<U> {
             match self.rx2.poll()? {
                 Async::Ready(Some((not, sender))) => {
                     self.buffer.push_back(
-                        EncoderMessage::Notification(
-                            not,
-                            sender,
-                        ),
+                        EncoderMessage::Notification(not, sender),
                     );
                     count += 1;
                     false
