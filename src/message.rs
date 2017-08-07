@@ -183,8 +183,8 @@ impl Response {
         Value::Array(vec![
             RESPONSE_TYPE.into(),
             id.into(),
-            self.0.as_ref().ok().cloned().unwrap_or(Value::Nil),
             self.0.as_ref().err().cloned().unwrap_or(Value::Nil),
+            self.0.as_ref().ok().cloned().unwrap_or(Value::Nil),
         ])
     }
 }
