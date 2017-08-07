@@ -46,89 +46,12 @@ impl Decoder for Codec {
 }
 
 
-/// A transport consists of a pair of stream/sink.
-pub struct Transport<T: Stream, U: Sink>(T, U);
-
-impl<T: Stream, U: Sink> Transport<T, U> {
-    pub fn new(stream: T, sink: U) -> Self {
-        Transport(stream, sink)
-    }
-}
-
-impl<T: Stream, U: Sink> Stream for Transport<T, U> {
-    type Item = T::Item;
-    type Error = T::Error;
-
-    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        self.0.poll()
-    }
-}
-
-impl<T: Stream, U: Sink> Sink for Transport<T, U> {
-    type SinkItem = U::SinkItem;
-    type SinkError = U::SinkError;
-
-    fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
-        self.1.start_send(item)
-    }
-
-    fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
-        self.1.poll_complete()
-    }
-}
-
-
-
 /// A protocol definition of Msgpack-RPC.
 ///
 /// Note that this protocol is only available for (framed) pairs of a stream/sink,
 /// because it will share same I/O stream both of client/server use.
 /// `tokio_proto` does not support such situation.
 pub struct Proto;
-
-impl<T, U> ::tokio_proto::multiplex::ClientProto<Transport<T, U>> for Proto
-where
-    T: 'static
-        + Stream<
-        Item = (u64, Response),
-        Error = io::Error,
-    >,
-    U: 'static
-        + Sink<
-        SinkItem = (u64, Request),
-        SinkError = io::Error,
-    >,
-{
-    type Request = Request;
-    type Response = Response;
-    type Transport = Transport<T, U>;
-    type BindTransport = io::Result<Self::Transport>;
-    fn bind_transport(&self, transport: Transport<T, U>) -> Self::BindTransport {
-        Ok(transport)
-    }
-}
-
-impl<T, U> ::tokio_proto::multiplex::ServerProto<Transport<T, U>> for Proto
-where
-    T: 'static
-        + Stream<
-        Item = (u64, Request),
-        Error = io::Error,
-    >,
-    U: 'static
-        + Sink<
-        SinkItem = (u64, Response),
-        SinkError = io::Error,
-    >,
-{
-    type Request = Request;
-    type Response = Response;
-    type Transport = Transport<T, U>;
-    type BindTransport = io::Result<Self::Transport>;
-    fn bind_transport(&self, transport: Transport<T, U>) -> Self::BindTransport {
-        Ok(transport)
-    }
-}
 
 impl<T> ::tokio_proto::multiplex::ClientProto<T> for Proto
 where
@@ -191,8 +114,6 @@ impl<T: AsyncRead + AsyncWrite + 'static> Sink for __ClientTransport<T> {
         self.0.poll_complete()
     }
 }
-
-
 
 #[doc(hidden)]
 pub struct __ServerTransport<T>(Framed<T, Codec>);

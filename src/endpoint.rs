@@ -1,6 +1,6 @@
 use std::io;
 use std::sync::Arc;
-use futures::{Future, Stream, Sink};
+use futures::{Future, Stream, Sink,Poll, StartSend};
 use futures::future::Then;
 use futures::sync::mpsc::{self, UnboundedSender, UnboundedReceiver};
 use tokio_core::reactor::Handle;
@@ -14,8 +14,56 @@ use super::Handler;
 use super::client::Client;
 use super::distributor::{Demux, Mux};
 use super::message::{Message, Request, Response, Notification};
-use super::proto::{Codec, Proto, Transport};
+use super::proto::{Codec, Proto};
 use super::util::io_error;
+
+
+/// A transport consists of a pair of stream/sink.
+struct __ServerTransport<T: Stream, U: Sink>(T, U);
+
+impl<T: Stream, U: Sink> Stream for __ServerTransport<T, U> {
+    type Item = T::Item;
+    type Error = T::Error;
+
+    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+        self.0.poll()
+    }
+}
+
+impl<T: Stream, U: Sink> Sink for __ServerTransport<T, U> {
+    type SinkItem = U::SinkItem;
+    type SinkError = U::SinkError;
+
+    fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
+        self.1.start_send(item)
+    }
+
+    fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
+        self.1.poll_complete()
+    }
+}
+
+impl<T, U> ::tokio_proto::multiplex::ServerProto<__ServerTransport<T, U>> for Proto
+where
+    T: 'static
+        + Stream<
+        Item = (u64, Request),
+        Error = io::Error,
+    >,
+    U: 'static
+        + Sink<
+        SinkItem = (u64, Response),
+        SinkError = io::Error,
+    >,
+{
+    type Request = Request;
+    type Response = Response;
+    type Transport = __ServerTransport<T, U>;
+    type BindTransport = io::Result<Self::Transport>;
+    fn bind_transport(&self, transport: Self::Transport) -> Self::BindTransport {
+        Ok(transport)
+    }
+}
 
 
 struct HandleService<H: Handler>(H, Client);
@@ -120,10 +168,10 @@ impl Endpoint {
     pub fn serve<H: Handler>(self, handle: &Handle, handler: H) -> Client {
         let service = Arc::new(HandleService(handler, self.client.clone()));
 
-        let transport = Transport::new(
-            self.rx_req.map_err(|()| io_error("rx_req")),
-            self.tx_res.sink_map_err(|_| io_error("tx_res")),
-        );
+        let transport = __ServerTransport {
+            0: self.rx_req.map_err(|()| io_error("rx_req")),
+            1: self.tx_res.sink_map_err(|_| io_error("tx_res")),
+        };
 
         // Spawn services
         Proto.bind_server(&handle, transport, service.clone());
