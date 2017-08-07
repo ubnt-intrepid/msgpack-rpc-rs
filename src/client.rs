@@ -1,5 +1,5 @@
 use std::io;
-use futures::{Future, Stream, Sink, Poll};
+use futures::{Future, Stream, Sink, Poll, BoxFuture};
 use futures::sink::SinkMapErr;
 use futures::stream::MapErr;
 use futures::sync::mpsc::{UnboundedSender, UnboundedReceiver, SendError};
@@ -71,11 +71,19 @@ impl Client {
     }
 
     /// Send a notification message to the server.
-    pub fn notify<S: Into<String>, P: Into<Value>>(&self, method: S, params: P) {
+    pub fn notify<S: Into<String>, P: Into<Value>>(
+        &self,
+        method: S,
+        params: P,
+    ) -> BoxFuture<(), ()> {
         let tx = self.tx_not.clone();
         let not = Notification::new(method, params);
-        self.handle.spawn(move |_handle| {
-            tx.send(not).map(|_| ()).map_err(|_| ())
-        });
+        tx.send(not)
+            .map(|_| {
+                eprintln!("[debug]");
+                ()
+            })
+            .map_err(|_| ())
+            .boxed()
     }
 }

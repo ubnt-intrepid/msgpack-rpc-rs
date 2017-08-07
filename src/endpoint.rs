@@ -127,7 +127,10 @@ impl Endpoint {
 
         // Spawn services
         Proto.bind_server(&handle, transport, service.clone());
-        handle.spawn(self.rx_not.for_each(move |not| service.call_not(not)));
+        handle.spawn(self.rx_not.for_each(move |not| {
+            eprintln!("[debug]");
+            service.call_not(not)
+        }));
 
         self.client
     }
