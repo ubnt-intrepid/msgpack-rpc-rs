@@ -1,8 +1,7 @@
 use std::io;
 use futures::{Future, Stream, Sink, Poll, BoxFuture, StartSend};
-use futures::sink::SinkMapErr;
-use futures::stream::MapErr;
-use futures::sync::mpsc::{UnboundedSender, UnboundedReceiver, SendError};
+use futures::sync::mpsc::{UnboundedSender, UnboundedReceiver};
+use futures::sync::oneshot;
 use tokio_core::reactor::{Handle, Remote};
 use tokio_proto::BindClient;
 use tokio_proto::multiplex::ClientService;
@@ -13,44 +12,46 @@ use super::message::{Request, Response, Notification};
 use super::util::io_error;
 
 
-struct Transport<T: Stream, U: Sink>(T, U);
+struct ClientTransport {
+    stream: UnboundedReceiver<(u64, Response)>,
+    sink: UnboundedSender<(u64, Request)>,
+}
 
-impl<T: Stream, U: Sink> Stream for Transport<T, U> {
-    type Item = T::Item;
-    type Error = T::Error;
+impl Stream for ClientTransport {
+    type Item = (u64, Response);
+    type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        self.0.poll()
+        self.stream.poll().map_err(
+            |_| io_error("ClientTransport::poll()"),
+        )
     }
 }
 
-impl<T: Stream, U: Sink> Sink for Transport<T, U> {
-    type SinkItem = U::SinkItem;
-    type SinkError = U::SinkError;
+impl Sink for ClientTransport {
+    type SinkItem = (u64, Request);
+    type SinkError = io::Error;
 
     fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
-        self.1.start_send(item)
+        self.sink.start_send(item).map_err(|_| {
+            io_error("ClientTransport::start_send()")
+        })
     }
 
     fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
-        self.1.poll_complete()
+        self.sink.poll_complete().map_err(|_| {
+            io_error("ClientTransport::poll_complete()")
+        })
     }
 }
 
-type __ClientTransport = Transport<
-    MapErr<UnboundedReceiver<(u64, Response)>, fn(()) -> io::Error>,
-    SinkMapErr<
-        UnboundedSender<(u64, Request)>,
-        fn(SendError<(u64, Request)>) -> io::Error,
-    >,
->;
 
-struct Proto;
+struct ClientProto;
 
-impl ::tokio_proto::multiplex::ClientProto<__ClientTransport> for Proto {
+impl ::tokio_proto::multiplex::ClientProto<ClientTransport> for ClientProto {
     type Request = Request;
     type Response = Response;
-    type Transport = __ClientTransport;
+    type Transport = ClientTransport;
     type BindTransport = io::Result<Self::Transport>;
     fn bind_transport(&self, transport: Self::Transport) -> Self::BindTransport {
         Ok(transport)
@@ -58,25 +59,24 @@ impl ::tokio_proto::multiplex::ClientProto<__ClientTransport> for Proto {
 }
 
 
-
 /// The return type of `Client::request()`, represents a future of RPC request.
-pub struct ClientFuture(<ClientService<__ClientTransport, Proto> as Service>::Future);
+pub struct ClientFuture(<ClientService<ClientTransport, ClientProto> as Service>::Future);
 
 impl Future for ClientFuture {
     type Item = Response;
     type Error = io::Error;
+
     #[inline(always)]
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         self.0.poll()
     }
 }
 
-use futures::sync::oneshot;
 
 /// A client of Msgpack-RPC
 #[derive(Clone)]
 pub struct Client {
-    inner: ClientService<__ClientTransport, Proto>,
+    inner: ClientService<ClientTransport, ClientProto>,
     tx_not: UnboundedSender<(Notification, oneshot::Sender<()>)>,
     handle: Remote,
 }
@@ -89,12 +89,12 @@ impl Client {
         rx_res: UnboundedReceiver<(u64, Response)>,
         tx_not: UnboundedSender<(Notification, oneshot::Sender<()>)>,
     ) -> Self {
-        let transport = __ClientTransport {
-            0:rx_res.map_err((|()| io_error("rx_res")) as fn(()) -> io::Error),
-            1:tx_req.sink_map_err((|_| io_error("tx_req")) as fn(SendError<(u64, Request)>) -> io::Error),
+        let transport = ClientTransport {
+            stream: rx_res,
+            sink: tx_req,
         };
 
-        let inner = Proto.bind_client(handle, transport);
+        let inner = ClientProto.bind_client(handle, transport);
         Client {
             inner,
             tx_not,

@@ -19,46 +19,46 @@ use super::util::io_error;
 
 
 /// A transport consists of a pair of stream/sink.
-struct __ServerTransport<T: Stream, U: Sink>(T, U);
+struct EndpointTransport {
+    stream: UnboundedReceiver<(u64, Request)>,
+    sink: UnboundedSender<(u64, Response)>,
+}
 
-impl<T: Stream, U: Sink> Stream for __ServerTransport<T, U> {
-    type Item = T::Item;
-    type Error = T::Error;
+impl Stream for EndpointTransport {
+    type Item = (u64, Request);
+    type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        self.0.poll()
+        self.stream.poll().map_err(
+            |_| io_error("EndpontTransport::poll()"),
+        )
     }
 }
 
-impl<T: Stream, U: Sink> Sink for __ServerTransport<T, U> {
-    type SinkItem = U::SinkItem;
-    type SinkError = U::SinkError;
+impl Sink for EndpointTransport {
+    type SinkItem = (u64, Response);
+    type SinkError = io::Error;
 
     fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
-        self.1.start_send(item)
+        self.sink.start_send(item).map_err(|_| {
+            io_error("EndpontTransport::start_send()")
+        })
     }
 
     fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
-        self.1.poll_complete()
+        self.sink.poll_complete().map_err(|_| {
+            io_error("EndpontTransport::poll_complete()")
+        })
     }
 }
-struct Proto;
-impl<T, U> ::tokio_proto::multiplex::ServerProto<__ServerTransport<T, U>> for Proto
-where
-    T: 'static
-        + Stream<
-        Item = (u64, Request),
-        Error = io::Error,
-    >,
-    U: 'static
-        + Sink<
-        SinkItem = (u64, Response),
-        SinkError = io::Error,
-    >,
-{
+
+
+struct EndpointProto;
+
+impl ::tokio_proto::multiplex::ServerProto<EndpointTransport> for EndpointProto {
     type Request = Request;
     type Response = Response;
-    type Transport = __ServerTransport<T, U>;
+    type Transport = EndpointTransport;
     type BindTransport = io::Result<Self::Transport>;
     fn bind_transport(&self, transport: Self::Transport) -> Self::BindTransport {
         Ok(transport)
@@ -158,13 +158,13 @@ impl Endpoint {
     pub fn serve<H: Handler>(self, handle: &Handle, handler: H) -> Client {
         let service = Arc::new(HandleService(handler, self.client.clone()));
 
-        let transport = __ServerTransport {
-            0: self.rx_req.map_err(|()| io_error("rx_req")),
-            1: self.tx_res.sink_map_err(|_| io_error("tx_res")),
+        let transport = EndpointTransport {
+            stream: self.rx_req,
+            sink: self.tx_res,
         };
 
         // Spawn services
-        Proto.bind_server(&handle, transport, service.clone());
+        EndpointProto.bind_server(&handle, transport, service.clone());
         handle.spawn(self.rx_not.for_each(move |not| service.call_not(not)));
 
         self.client
