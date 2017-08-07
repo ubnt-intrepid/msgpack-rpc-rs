@@ -13,8 +13,8 @@ use rmpv::Value;
 use super::Handler;
 use super::client::Client;
 use super::distributor::{Demux, Mux};
-use super::message::{Message, Request, Response, Notification};
-use super::proto::{Codec, Proto};
+use super::message::{self, Request, Response, Notification};
+use super::proto::{Codec };
 use super::util::io_error;
 
 
@@ -42,7 +42,7 @@ impl<T: Stream, U: Sink> Sink for __ServerTransport<T, U> {
         self.1.poll_complete()
     }
 }
-
+struct Proto;
 impl<T, U> ::tokio_proto::multiplex::ServerProto<__ServerTransport<T, U>> for Proto
 where
     T: 'static
@@ -115,8 +115,8 @@ impl Endpoint {
     /// Create a RPC endpoint from a pair of stream/sink.
     pub fn from_transport<T, U>(handle: &Handle, stream: T, sink: U) -> Self
     where
-        T: Stream<Item = Message> + 'static,
-        U: Sink<SinkItem = Message> + 'static,
+        T: Stream<Item = message::DecoderMessage> + 'static,
+        U: Sink<SinkItem = message::EncoderMessage> + 'static,
     {
         // create wires.
         let (d_tx0, d_rx0) = mpsc::unbounded();

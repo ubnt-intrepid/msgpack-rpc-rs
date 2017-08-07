@@ -5,9 +5,38 @@ const REQUEST_TYPE: i64 = 0;
 const RESPONSE_TYPE: i64 = 1;
 const NOTIFICATION_TYPE: i64 = 2;
 
+use futures::sync::oneshot;
 
 #[derive(Debug)]
-pub enum Message {
+pub enum EncoderMessage {
+    #[doc(hidden)]
+    Request(u64, Request),
+    #[doc(hidden)]
+    Response(u64, Response),
+    #[doc(hidden)]
+    Notification(Notification, oneshot::Sender<()>),
+}
+
+impl EncoderMessage {
+    /// Write a response to an output stream, with given ID.
+    pub fn into_writer<W: Write>(self, w: &mut W) -> io::Result<()> {
+        let packet = match self {
+            EncoderMessage::Request(id, ref req) => req.to_packet(id),
+            EncoderMessage::Response(id, ref res) => res.to_packet(id),
+            EncoderMessage::Notification(ref not, _) => not.to_packet(),
+        };
+        write_packet(w, &packet)?;
+
+        if let EncoderMessage::Notification(_, done) = self {
+            let _ = done.send(());
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub enum DecoderMessage {
     #[doc(hidden)]
     Request(u64, Request),
     #[doc(hidden)]
@@ -16,9 +45,9 @@ pub enum Message {
     Notification(Notification),
 }
 
-impl Message {
+impl DecoderMessage {
     /// Read a request and its ID from an input stream
-    pub fn from_reader<R: Read>(r: &mut R) -> Result<Message, DecodeError> {
+    pub fn from_reader<R: Read>(r: &mut R) -> Result<Self, DecodeError> {
         let value = next_value(r)?;
         let array = value.as_array().ok_or(DecodeError::Invalid)?;
         match (array.get(0).and_then(|v| v.as_i64()), array.len()) {
@@ -28,68 +57,9 @@ impl Message {
             _ => Err(DecodeError::Invalid),
         }
     }
-
-    /// Write a response to an output stream, with given ID.
-    pub fn to_writer<W: Write>(&self, w: &mut W) -> io::Result<()> {
-        let packet = match *self {
-            Message::Request(id, ref req) => req.to_packet(id),
-            Message::Response(id, ref res) => res.to_packet(id),
-            Message::Notification(ref not) => not.to_packet(),
-        };
-        write_packet(w, &packet)
-    }
 }
 
-#[doc(hidden)]
-impl Into<(u64, Request)> for Message {
-    fn into(self) -> (u64, Request) {
-        match self {
-            Message::Request(id, req) => (id, req),
-            _ => panic!("invalid vairiant"),
-        }
-    }
-}
 
-#[doc(hidden)]
-impl Into<(u64, Response)> for Message {
-    fn into(self) -> (u64, Response) {
-        match self {
-            Message::Response(id, res) => (id, res),
-            _ => panic!("invalid vairiant"),
-        }
-    }
-}
-
-#[doc(hidden)]
-impl Into<Notification> for Message {
-    fn into(self) -> Notification {
-        match self {
-            Message::Notification(not) => not,
-            _ => panic!("invalid vairiant"),
-        }
-    }
-}
-
-#[doc(hidden)]
-impl From<(u64, Request)> for Message {
-    fn from(val: (u64, Request)) -> Message {
-        Message::Request(val.0, val.1)
-    }
-}
-
-#[doc(hidden)]
-impl From<(u64, Response)> for Message {
-    fn from(val: (u64, Response)) -> Message {
-        Message::Response(val.0, val.1)
-    }
-}
-
-#[doc(hidden)]
-impl From<Notification> for Message {
-    fn from(val: Notification) -> Message {
-        Message::Notification(val)
-    }
-}
 
 
 /// A request message
@@ -110,10 +80,10 @@ impl Request {
         }
     }
 
-    fn from_array(array: &[Value]) -> Result<Message, DecodeError> {
+    fn from_array(array: &[Value]) -> Result<DecoderMessage, DecodeError> {
         match (array[0].as_i64(), array[1].as_str(), array[2].is_array()) {
             (Some(id), Some(method), true) => {
-                Ok(Message::Request(
+                Ok(DecoderMessage::Request(
                     id as u64,
                     Request {
                         method: method.to_owned(),
@@ -164,12 +134,12 @@ impl Response {
         self.0
     }
 
-    fn from_array(array: &[Value]) -> Result<Message, DecodeError> {
+    fn from_array(array: &[Value]) -> Result<DecoderMessage, DecodeError> {
         match (array[0].as_i64(), &array[1], &array[2]) {
             (Some(id), val, &Value::Nil) => Ok(
-                Message::Response(id as u64, Response(Ok(val.clone()))),
+                DecoderMessage::Response(id as u64, Response(Ok(val.clone()))),
             ),
-            (Some(id), &Value::Nil, val) => Ok(Message::Response(
+            (Some(id), &Value::Nil, val) => Ok(DecoderMessage::Response(
                 id as u64,
                 Response(Err(val.clone())),
             )),
@@ -206,9 +176,9 @@ impl Notification {
         }
     }
 
-    fn from_array(array: &[Value]) -> Result<Message, DecodeError> {
+    fn from_array(array: &[Value]) -> Result<DecoderMessage, DecodeError> {
         match (array[0].as_str(), array[1].is_array()) {
-            (Some(method), true) => Ok(Message::Notification(Notification {
+            (Some(method), true) => Ok(DecoderMessage::Notification(Notification {
                 method: method.to_owned(),
                 params: array[1].clone(),
             })),

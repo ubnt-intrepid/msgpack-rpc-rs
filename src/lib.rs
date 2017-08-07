@@ -78,7 +78,6 @@ pub mod io;
 pub mod proto;
 
 pub use rmpv::Value;
-pub use self::message::Message;
 pub use self::client::{Client, ClientFuture};
 pub use self::endpoint::Endpoint;
 

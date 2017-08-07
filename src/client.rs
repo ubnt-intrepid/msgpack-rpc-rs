@@ -10,7 +10,6 @@ use tokio_service::Service;
 use rmpv::Value;
 
 use super::message::{Request, Response, Notification};
-use super::proto::Proto;
 use super::util::io_error;
 
 
@@ -45,6 +44,8 @@ type __ClientTransport = Transport<
         fn(SendError<(u64, Request)>) -> io::Error,
     >,
 >;
+
+struct Proto;
 
 impl ::tokio_proto::multiplex::ClientProto<__ClientTransport> for Proto {
     type Request = Request;
