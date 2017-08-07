@@ -1,6 +1,6 @@
 use std::io;
 use std::sync::Arc;
-use futures::{Future, Stream, Sink};
+use futures::{Future, Stream, Sink, Poll, StartSend};
 use futures::future::Then;
 use futures::sync::mpsc::{self, UnboundedSender, UnboundedReceiver};
 use tokio_core::reactor::Handle;
@@ -13,9 +13,56 @@ use rmpv::Value;
 use super::Handler;
 use super::client::Client;
 use super::distributor::{Demux, Mux};
-use super::message::{Message, Request, Response, Notification};
-use super::proto::{Codec, Proto, Transport};
+use super::message::{Codec, Request, Response, Notification};
 use super::util::io_error;
+
+
+/// A transport consists of a pair of stream/sink.
+struct EndpointTransport {
+    stream: UnboundedReceiver<(u64, Request)>,
+    sink: UnboundedSender<(u64, Response)>,
+}
+
+impl Stream for EndpointTransport {
+    type Item = (u64, Request);
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+        self.stream.poll().map_err(
+            |_| io_error("EndpontTransport::poll()"),
+        )
+    }
+}
+
+impl Sink for EndpointTransport {
+    type SinkItem = (u64, Response);
+    type SinkError = io::Error;
+
+    fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
+        self.sink.start_send(item).map_err(|_| {
+            io_error("EndpontTransport::start_send()")
+        })
+    }
+
+    fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
+        self.sink.poll_complete().map_err(|_| {
+            io_error("EndpontTransport::poll_complete()")
+        })
+    }
+}
+
+
+struct EndpointProto;
+
+impl ::tokio_proto::multiplex::ServerProto<EndpointTransport> for EndpointProto {
+    type Request = Request;
+    type Response = Response;
+    type Transport = EndpointTransport;
+    type BindTransport = io::Result<Self::Transport>;
+    fn bind_transport(&self, transport: Self::Transport) -> Self::BindTransport {
+        Ok(transport)
+    }
+}
 
 
 struct HandleService<H: Handler>(H, Client);
@@ -57,20 +104,10 @@ impl Endpoint {
     /// Create a RPC endpoint from asyncrhonous I/O.
     pub fn from_io<T: AsyncRead + AsyncWrite + 'static>(handle: &Handle, io: T) -> Self {
         let (read, write) = io.split();
-        Self::from_transport(
-            handle,
-            FramedRead::new(read, Codec),
-            FramedWrite::new(write, Codec),
-        )
-    }
 
-    /// Create a RPC endpoint from a pair of stream/sink.
-    pub fn from_transport<T, U>(handle: &Handle, stream: T, sink: U) -> Self
-    where
-        T: Stream<Item = Message> + 'static,
-        U: Sink<SinkItem = Message> + 'static,
-    {
         // create wires.
+        let stream = FramedRead::new(read, Codec);
+        let sink = FramedWrite::new(write, Codec);
         let (d_tx0, d_rx0) = mpsc::unbounded();
         let (d_tx1, d_rx1) = mpsc::unbounded();
         let (d_tx2, d_rx2) = mpsc::unbounded();
@@ -120,13 +157,13 @@ impl Endpoint {
     pub fn serve<H: Handler>(self, handle: &Handle, handler: H) -> Client {
         let service = Arc::new(HandleService(handler, self.client.clone()));
 
-        let transport = Transport::new(
-            self.rx_req.map_err(|()| io_error("rx_req")),
-            self.tx_res.sink_map_err(|_| io_error("tx_res")),
-        );
+        let transport = EndpointTransport {
+            stream: self.rx_req,
+            sink: self.tx_res,
+        };
 
         // Spawn services
-        Proto.bind_server(&handle, transport, service.clone());
+        EndpointProto.bind_server(&handle, transport, service.clone());
         handle.spawn(self.rx_not.for_each(move |not| service.call_not(not)));
 
         self.client
