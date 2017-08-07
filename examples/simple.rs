@@ -72,7 +72,7 @@ mod imp {
 
         // Launch a RPC endpoint with given service handlers.
         let endpoint = Endpoint::from_io(&handle, stdio);
-        endpoint.launch(&handle, RootHandler);
+        endpoint.serve(&handle, RootHandler);
 
         // start event loop infinitely.
         core.run(empty::<(), ()>()).unwrap();

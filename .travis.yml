@@ -14,8 +14,8 @@ before_script:
   - export PATH=$HOME/.local/bin:$PATH
 
 script:
-  - cargo build --all
-  - cargo test --all
+  - cargo build --all-features
+  - cargo test --all-features
 
 after_success:
   - bash scripts/deploy_doc.sh "${TRAVIS_BRANCH}" "${TRAVIS_RUST_VERSION}" "${GH_TOKEN}" "${TRAVIS_REPO_SLUG}"
