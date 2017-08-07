@@ -117,12 +117,7 @@ impl Client {
         let not = Notification::new(method, params);
         let (otx, orx) = oneshot::channel();
         self.handle.spawn(|_| {
-            tx.send((not, otx))
-                .map(|_| {
-                    eprintln!("[debug]");
-                    ()
-                })
-                .map_err(|_| ())
+            tx.send((not, otx)).map(|_| ()).map_err(|_| ())
         });
         orx.map_err(|_| ()).boxed()
     }

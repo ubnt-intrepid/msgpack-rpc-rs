@@ -72,10 +72,10 @@ mod client;
 mod distributor;
 mod endpoint;
 mod message;
+mod proto;
 mod util;
 
 pub mod io;
-pub mod proto;
 
 pub use rmpv::Value;
 pub use self::client::{Client, ClientFuture};

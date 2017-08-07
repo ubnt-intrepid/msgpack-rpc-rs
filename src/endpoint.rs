@@ -1,6 +1,6 @@
 use std::io;
 use std::sync::Arc;
-use futures::{Future, Stream, Sink,Poll, StartSend};
+use futures::{Future, Stream, Sink, Poll, StartSend};
 use futures::future::Then;
 use futures::sync::mpsc::{self, UnboundedSender, UnboundedReceiver};
 use tokio_core::reactor::Handle;
@@ -13,8 +13,8 @@ use rmpv::Value;
 use super::Handler;
 use super::client::Client;
 use super::distributor::{Demux, Mux};
-use super::message::{self, Request, Response, Notification};
-use super::proto::{Codec };
+use super::message::{Request, Response, Notification};
+use super::proto::Codec;
 use super::util::io_error;
 
 
@@ -105,20 +105,10 @@ impl Endpoint {
     /// Create a RPC endpoint from asyncrhonous I/O.
     pub fn from_io<T: AsyncRead + AsyncWrite + 'static>(handle: &Handle, io: T) -> Self {
         let (read, write) = io.split();
-        Self::from_transport(
-            handle,
-            FramedRead::new(read, Codec),
-            FramedWrite::new(write, Codec),
-        )
-    }
 
-    /// Create a RPC endpoint from a pair of stream/sink.
-    pub fn from_transport<T, U>(handle: &Handle, stream: T, sink: U) -> Self
-    where
-        T: Stream<Item = message::DecoderMessage> + 'static,
-        U: Sink<SinkItem = message::EncoderMessage> + 'static,
-    {
         // create wires.
+        let stream = FramedRead::new(read, Codec);
+        let sink = FramedWrite::new(write, Codec);
         let (d_tx0, d_rx0) = mpsc::unbounded();
         let (d_tx1, d_rx1) = mpsc::unbounded();
         let (d_tx2, d_rx2) = mpsc::unbounded();
@@ -175,10 +165,7 @@ impl Endpoint {
 
         // Spawn services
         Proto.bind_server(&handle, transport, service.clone());
-        handle.spawn(self.rx_not.for_each(move |not| {
-            eprintln!("[debug]");
-            service.call_not(not)
-        }));
+        handle.spawn(self.rx_not.for_each(move |not| service.call_not(not)));
 
         self.client
     }

@@ -5,14 +5,14 @@
 use std::io;
 use bytes::{BufMut, BytesMut};
 use tokio_io::codec::{Encoder, Decoder};
-use super::message::{self, DecodeError};
+use super::message::{EncoderMessage, DecoderMessage, DecodeError};
 
 
 /// A codec for `Message`.
 pub struct Codec;
 
 impl Encoder for Codec {
-    type Item = message::EncoderMessage;
+    type Item = EncoderMessage;
     type Error = io::Error;
 
     fn encode(&mut self, msg: Self::Item, buf: &mut BytesMut) -> io::Result<()> {
@@ -21,7 +21,7 @@ impl Encoder for Codec {
 }
 
 impl Decoder for Codec {
-    type Item = message::DecoderMessage;
+    type Item = DecoderMessage;
     type Error = io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<Self::Item>> {
@@ -29,7 +29,7 @@ impl Decoder for Codec {
         {
             let mut buf = io::Cursor::new(&src);
             res = loop {
-                match message::DecoderMessage::from_reader(&mut buf) {
+                match DecoderMessage::from_reader(&mut buf) {
                     Ok(message) => break Ok(Some(message)),
                     Err(DecodeError::Truncated) => return Ok(None),
                     Err(DecodeError::Invalid) => continue,
