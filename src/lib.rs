@@ -82,14 +82,17 @@ pub use self::message::Message;
 pub use self::client::{Client, ClientFuture};
 pub use self::endpoint::Endpoint;
 
+use std::rc::Rc;
+use std::sync::Arc;
+use futures::Future;
 
 /// A handler of requests/notifications.
 pub trait Handler: 'static {
     /// The future returned from `Self::handle_request()`
-    type RequestFuture: ::futures::Future<Item = Value, Error = Value>;
+    type RequestFuture: Future<Item = Value, Error = Value>;
 
     /// The future returned from `Self::handle_notification()`
-    type NotifyFuture: ::futures::Future<Item = (), Error = ()>;
+    type NotifyFuture: Future<Item = (), Error = ()>;
 
     /// Handler function to handle a request.
     fn handle_request(&self, method: &str, params: Value, client: &Client) -> Self::RequestFuture;
@@ -101,4 +104,58 @@ pub trait Handler: 'static {
         params: Value,
         client: &Client,
     ) -> Self::NotifyFuture;
+}
+
+impl<H: Handler> Handler for Box<H> {
+    type RequestFuture = H::RequestFuture;
+    type NotifyFuture = H::NotifyFuture;
+
+    fn handle_request(&self, method: &str, params: Value, client: &Client) -> Self::RequestFuture {
+        (**self).handle_request(method, params, client)
+    }
+
+    fn handle_notification(
+        &self,
+        method: &str,
+        params: Value,
+        client: &Client,
+    ) -> Self::NotifyFuture {
+        (**self).handle_notification(method, params, client)
+    }
+}
+
+impl<H: Handler> Handler for Rc<H> {
+    type RequestFuture = H::RequestFuture;
+    type NotifyFuture = H::NotifyFuture;
+
+    fn handle_request(&self, method: &str, params: Value, client: &Client) -> Self::RequestFuture {
+        (**self).handle_request(method, params, client)
+    }
+
+    fn handle_notification(
+        &self,
+        method: &str,
+        params: Value,
+        client: &Client,
+    ) -> Self::NotifyFuture {
+        (**self).handle_notification(method, params, client)
+    }
+}
+
+impl<H: Handler> Handler for Arc<H> {
+    type RequestFuture = H::RequestFuture;
+    type NotifyFuture = H::NotifyFuture;
+
+    fn handle_request(&self, method: &str, params: Value, client: &Client) -> Self::RequestFuture {
+        (**self).handle_request(method, params, client)
+    }
+
+    fn handle_notification(
+        &self,
+        method: &str,
+        params: Value,
+        client: &Client,
+    ) -> Self::NotifyFuture {
+        (**self).handle_notification(method, params, client)
+    }
 }
