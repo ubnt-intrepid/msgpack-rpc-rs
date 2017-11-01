@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["Value","Represents any valid MessagePack value."]],"mod":[["io",""]],"struct":[["Ack",""],["Client","A client of Msgpack-RPC"],["Endpoint","An endpoint represents a peer of MessagePack-RPC."],["Response","The return type of `Client::request()`, represents a future of RPC request."]],"trait":[["Handler","A handler of requests/notifications."]]});
